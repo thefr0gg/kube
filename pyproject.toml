@@ -1,0 +1,40 @@
+[tool.poetry]
+name = "kube"
+version = "0.1.0"
+description = "Spatial-native data system for face-addressable, memory-mapped datasets"
+authors = []
+readme = "README.md"
+packages = [{ include = "kube" }]
+include = [
+    { path = "kube/**/*.so", format = "wheel" },
+    { path = "kube/**/*.dll", format = "wheel" },
+    { path = "kube/**/*.dylib", format = "wheel" },
+    { path = "build.py", format = "sdist" },
+    { path = "CMakeLists.txt", format = "sdist" },
+    { path = "src/**/*.c", format = "sdist" },
+    { path = "src/**/*.h", format = "sdist" },
+]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+polars = "^1.30"
+tokenizers = { version = "^0.19", optional = true }
+torch = { version = "^2.0", optional = true }
+datasets = { version = "^2.19", optional = true }
+transformers = { version = "^4.41", optional = true }
+
+[tool.poetry.scripts]
+kube = "kube.main:main"
+
+[tool.poetry.extras]
+llm = ["tokenizers"]
+torch = ["tokenizers", "torch"]
+hf = ["datasets", "transformers", "tokenizers"]
+examples = ["datasets", "transformers", "tokenizers", "torch"]
+
+[tool.poetry.build]
+script = "build.py"
+
+[build-system]
+requires      = ["poetry-core", "cmake>=3.20"]
+build-backend = "poetry.core.masonry.api"
