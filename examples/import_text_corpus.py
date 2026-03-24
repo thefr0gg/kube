@@ -9,10 +9,15 @@ Workflow:
 2. Read a Parquet or Arrow/IPC table that contains a text column.
 3. Tokenize that text with a tokenizer JSON file.
 4. Import the tokenized documents into dataset shards.
+5. Write provenance metadata (split, source) via creation_parameters using the metadata key constants.
 
 Typical usage:
 
     python examples/import_text_corpus.py news.parquet corpora/news.kubed tokenizer.json
+
+    python examples/import_text_corpus.py news.parquet corpora/news.kubed tokenizer.json \
+        --split train \
+        --dataset-name news-corpus
 """
 
 from __future__ import annotations
@@ -22,7 +27,9 @@ import json
 import shutil
 from pathlib import Path
 
-from kube import create_sharded, import_arrow_text, import_parquet_text
+from kube import import_arrow_text, import_parquet_text
+from kube.dataset import ShardedKubeDataset
+from kube.metadata import SOURCE_DATASET, SPLIT
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,6 +55,11 @@ def parse_args() -> argparse.Namespace:
         help="Optional dataset name written into the dataset manifest",
     )
     parser.add_argument(
+        "--split",
+        default="train",
+        help="Dataset split label written into shard metadata (e.g. train, val, test)",
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Remove an existing dataset root before recreating it",
@@ -62,13 +74,19 @@ def main() -> None:
     if args.overwrite and args.root.exists():
         shutil.rmtree(args.root)
 
-    create_sharded(
+    dataset_name = args.dataset_name or args.root.stem
+
+    ShardedKubeDataset.create(
         args.root,
         shards=args.shards,
         token_bytes=args.token_bytes,
         tokens_per_shard=args.tokens_per_shard,
         sequence_length=args.sequence_length,
-        dataset_name=args.dataset_name,
+        dataset_name=dataset_name,
+        creation_parameters={
+            SPLIT: args.split,
+            SOURCE_DATASET: str(args.src),
+        },
     ).close()
 
     if args.src.suffix.lower() == ".parquet":
@@ -89,9 +107,17 @@ def main() -> None:
         raise SystemExit("source table must be .parquet, .arrow, .ipc, or .feather")
 
     with dataset:
+        info = dataset.inspect()
+        meta = dataset.manifest.get("creation_parameters", {})
+
         print("dataset summary")
         print("===============")
-        print(json.dumps(dataset.inspect(), indent=2))
+        print(json.dumps(info, indent=2))
+        print()
+        print("metadata")
+        print("--------")
+        print(f"  {SPLIT}          : {meta.get(SPLIT, '—')}")
+        print(f"  {SOURCE_DATASET} : {meta.get(SOURCE_DATASET, '—')}")
         print()
         print("shard preview")
         print("=============")

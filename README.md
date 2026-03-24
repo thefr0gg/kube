@@ -3,7 +3,7 @@
 Kube is a spatial-native data system for datasets that need structure, locality,
 and direct editability.
 
-Contributor setup and workflow notes live in [CONTRIBUTING.md](/c:/Users/0rams/Documents/Coding/Projects/kube/CONTRIBUTING.md).
+Contributor setup and workflow notes live in [CONTRIBUTING.md](https://github.com/ramsy0dev/kube/blob/main/CONTRIBUTING.md).
 
 Instead of treating data as only rows, tokens, or voxels, Kube models it as a
 grid of cells whose six faces carry discrete state. That gives you a compact
@@ -99,7 +99,7 @@ In practice, that makes Kube a good fit for:
 Clone the repository first:
 
 ```bash
-git clone <your-kube-repo-url>
+git clone https://github.com/ramsy0dev/kube.git
 cd kube
 ```
 
@@ -223,9 +223,9 @@ Useful build flags:
 
 Important native sources:
 
-- [src/kube_storage.c](/c:/Users/0rams/Documents/Coding/Projects/kube/src/kube_storage.c): packed-cell storage engine used by the Python runtime
-- [src/kube_renderer.c](/c:/Users/0rams/Documents/Coding/Projects/kube/src/kube_renderer.c): raylib renderer/editor loop
-- [src/kube_ui_clay.c](/c:/Users/0rams/Documents/Coding/Projects/kube/src/kube_ui_clay.c): Clay-based editor UI
+- [src/kube_storage.c](src/kube_storage.c): packed-cell storage engine used by the Python runtime
+- [src/kube_renderer.c](src/kube_renderer.c): raylib renderer/editor loop
+- [src/kube_ui_clay.c](src/kube_ui_clay.c): Clay-based editor UI
 
 ## CLI
 
@@ -635,7 +635,7 @@ Typical workflow:
 6. Optionally export shard or document stats to Parquet for dataset inspection.
 7. Write transformed or predicted outputs back into a new `Kube` or `.kubed` dataset.
 
-See [docs/library-integration.md](/c:/Users/0rams/Documents/Coding/Projects/kube/docs/library-integration.md) for a more detailed guide.
+See [docs/library-integration.md](docs/library-integration.md) for a more detailed guide.
 
 ## Editor Controls
 
@@ -664,11 +664,83 @@ The built-in Python console now supports:
 
 ## Project Layout
 
-- [kube/model.py](/c:/Users/0rams/Documents/Coding/Projects/kube/kube/model.py): storage model and file format logic
-- [kube/main.py](/c:/Users/0rams/Documents/Coding/Projects/kube/kube/main.py): CLI
-- [kube/renderer.py](/c:/Users/0rams/Documents/Coding/Projects/kube/kube/renderer.py): Python/native bridge
-- [src/kube_renderer.c](/c:/Users/0rams/Documents/Coding/Projects/kube/src/kube_renderer.c): native raylib renderer and editor loop
-- [tests/test_kube.py](/c:/Users/0rams/Documents/Coding/Projects/kube/tests/test_kube.py): tests
+- [kube/model.py](kube/model.py): storage model and file format logic
+- [kube/main.py](kube/main.py): CLI
+- [kube/renderer.py](kube/renderer.py): Python/native bridge
+- [src/kube_renderer.c](src/kube_renderer.c): native raylib renderer and editor loop
+- [tests/test_kube.py](tests/test_kube.py): tests
+
+## Benchmark Results
+
+Run the suite yourself:
+
+```bash
+kube benchmark --size 64 --iterations 5
+kube benchmark --size 64 --iterations 5 --output json > results.json
+```
+
+Results on a 64³ grid, 4 states, 5 iterations (Windows, MinGW64, w64devkit gcc):
+
+```
+kube benchmark  v0.0.0+local
+size=64³  s=4 states  5 iters
+────────────────────────────────────────────────────────────────────────
+Workload               Backend                Throughput   Best ms   Mean ms
+────────────────────────────────────────────────────────────────────────
+random_read            kube                   5.0M ops/s      39.7      46.3
+random_read            numpy                 22.5M ops/s       8.9       9.8
+random_read            binary 1 bit/cell       1.8M ops/s     111.8     117.8
+
+random_write           kube                 399.1M ops/s       0.5       0.7
+random_write           numpy                 54.0M ops/s       3.7       4.2
+random_write           binary 1 bit/cell       1.3M ops/s     150.5     164.4
+
+neighborhood           kube                   6.1M ops/s       9.7      10.5
+neighborhood           numpy                 33.1M ops/s       1.8       1.9
+
+region_extract         kube lower octant        88k ops/s     373.2     439.3
+region_extract         numpy                135.2M ops/s       0.2       0.3
+
+full_scan              kube                    88k ops/s    2991.9    3239.0
+full_scan              numpy reshape+sum     200.6M ops/s       1.3       1.5
+
+histogram              kube                   108k ops/s    2437.2    3581.2
+histogram              numpy np.bincount     145.7M ops/s       1.8       1.9
+histogram              polars                  90k ops/s    2905.8    2977.0
+
+polars_pipeline        kube filter+group_by        87k ops/s    3000.6    3180.9
+polars_pipeline        numpy→polars→filter+group_by      46.2M ops/s       5.7       7.6
+
+batch_iter[1k]         kube                    90k ops/s    2918.7    4233.1
+batch_iter[64k]        kube                    87k ops/s    3014.2    3256.6
+batch_iter[512k]       kube                    88k ops/s    2989.9    3251.0
+
+mutation               kube interleaved r+w      10.3M ops/s      19.4      22.3
+mutation               numpy                 37.9M ops/s       5.3       5.6
+mutation               binary 1 bit/cell       1.5M ops/s     129.1     140.7
+
+export_arrow           kube wide_faces         85k ops/s    3068.4    3642.5
+export_arrow           kube long_faces        440k ops/s    3578.3    3971.7
+export_arrow           kube cell_packed       174k ops/s    1509.3    1686.8
+
+export_parquet         kube wide_faces        129k ops/s    2029.6    2343.8
+
+export_numpy           kube faces_to_numpy       135k ops/s    1942.6    1991.8
+export_numpy           kube to_numpy flat       149k ops/s    1754.2    1852.7
+
+export_pandas          kube to_pandas         141k ops/s    1864.3    1910.4
+
+sklearn_xy             kube to_sklearn_xy       146k ops/s    1795.4    1840.6
+────────────────────────────────────────────────────────────────────────
+```
+
+Key takeaways:
+
+- **random_write** is the fastest single-cell path — the native storage engine batches packed-cell writes without per-call Python overhead.
+- **random_read** is slower than numpy because numpy uses direct array indexing while Kube unpacks face values from packed storage on each access.
+- **binary 1 bit/cell** is consistently the slowest backend despite storing less data — the Python loop over individual cells dominates.
+- **full_scan / histogram / polars_pipeline** throughputs reflect the cost of materializing a full Polars frame on each call; the frame itself is fast once built.
+- **export_arrow / export_parquet / export_numpy / export_pandas** throughputs cover the full round-trip including frame construction and format serialization.
 
 ## Current Notes
 

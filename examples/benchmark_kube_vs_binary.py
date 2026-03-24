@@ -23,6 +23,12 @@ What this script explains:
   random access over packed storage
 - Kube now always uses its native storage engine for packed random IO
 
+For a comprehensive multi-workload benchmark covering numpy, polars, Arrow,
+Parquet, and sklearn paths, use the built-in benchmark suite instead:
+
+    kube benchmark --size 64 --iterations 5
+    kube benchmark --size 128 --iterations 3 --output json > results.json
+
 Typical usage:
 
     python examples/benchmark_kube_vs_binary.py
@@ -38,6 +44,7 @@ import time
 from dataclasses import dataclass
 
 from kube import Kube
+from kube.integrations import available_backends
 
 
 @dataclass
@@ -232,6 +239,7 @@ def print_storage_summary(
     states: int,
     binary: BinaryOccupancyGrid,
     kube: Kube,
+    compiled,
 ) -> None:
     """Print the representational and storage differences between the models."""
     cell_count = shape[0] * shape[1] * shape[2]
@@ -253,6 +261,8 @@ def print_storage_summary(
     print()
     print("kube cell/face/state model")
     print("--------------------------")
+    print(f"kube                      : {kube}")
+    print(f"compiled batch            : {compiled!r}")
     print(f"model                     : 6 oriented faces per cell, {states} states per face")
     print(f"bits per face             : {kube_stats['bits_per_face']}")
     print(f"bits per cell             : {kube.bits_per_cell}")
@@ -264,6 +274,10 @@ def print_storage_summary(
     print("--------")
     print(f"storage multiplier        : {kube_stats['packed_bytes'] / binary.nbytes:.2f}x binary")
     print(f"state-space multiplier    : {kube_local_states / binary_local_states:,.0f}x binary")
+    print()
+    print("available backends")
+    print("------------------")
+    print(f"  {', '.join(available_backends())}")
 
 
 def print_timing_table(
@@ -314,7 +328,7 @@ def main() -> None:
     kube = Kube(width, height, depth, states=args.states)
     compiled = kube.compile_face_batch(ops)
 
-    print_storage_summary(args.shape, args.states, binary, kube)
+    print_storage_summary(args.shape, args.states, binary, kube, compiled)
 
     binary_writes = measure(lambda: benchmark_binary_writes(binary, ops), repeats=args.repeats)
     kube_writes = measure(lambda: benchmark_kube_writes(kube, compiled, ops), repeats=args.repeats)

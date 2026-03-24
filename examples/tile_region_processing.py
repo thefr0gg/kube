@@ -9,6 +9,8 @@ Workflow:
 1. Open a mapped `.kube` file in read-only mode.
 2. Iterate a bounded region in fixed-size sub-cubes.
 3. Compute a tiny per-tile summary that can be logged or exported.
+4. Optionally export the full region as a single Arrow IPC file via
+   `kube.to_arrow(bounds=...)` for downstream tools.
 
 Typical usage:
 
@@ -17,7 +19,8 @@ Typical usage:
     python examples/tile_region_processing.py data/world.kube \
         --bounds 0:128,0:128,0:64 \
         --tile-shape 32x32x16 \
-        --summary-out reports/world-tiles.parquet
+        --summary-out reports/world-tiles.parquet \
+        --arrow-out reports/world-region.arrow
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from pathlib import Path
 import polars as pl
 
 from kube import open as open_kube
+from kube.schemas import SCHEMA_WIDE_FACES
 
 
 def parse_bounds(text: str):
@@ -80,6 +84,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Optional Parquet path for the per-tile summary table",
     )
+    parser.add_argument(
+        "--arrow-out",
+        type=Path,
+        help="Optional Arrow IPC path for the full region exported in one call via to_arrow(bounds=...)",
+    )
     return parser.parse_args()
 
 
@@ -89,6 +98,10 @@ def main() -> None:
     rows: list[dict[str, int]] = []
 
     with open_kube(args.kube_path, mode="r") as kube:
+        print(f"kube  : {kube}")
+        print(f"schema: {list(kube.schema(SCHEMA_WIDE_FACES).keys())}")
+        print()
+
         for origin, tile in kube.iter_region(args.bounds, tile_shape=args.tile_shape):
             rows.append(
                 {
@@ -101,6 +114,16 @@ def main() -> None:
                     "face_4_sum": int(tile["face_4"].sum()),
                 }
             )
+
+        if args.arrow_out is not None:
+            table = kube.to_arrow(bounds=args.bounds)
+            try:
+                import pyarrow.ipc as ipc
+                with ipc.new_file(str(args.arrow_out), table.schema) as writer:
+                    writer.write_table(table)
+                print(f"arrow region export : {args.arrow_out}  ({table.num_rows:,} rows)")
+            except ImportError:
+                print("skipping arrow export: pyarrow not installed")
 
     summary = pl.DataFrame(rows)
     print(summary)

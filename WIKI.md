@@ -967,7 +967,7 @@ kube.insp<Tab>
 
 The exported function is:
 
-```c
+```
 KUBE_API void kube_run(...)
 ```
 

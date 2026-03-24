@@ -61,7 +61,7 @@ You will typically need:
 Windows example:
 
 ```powershell
-$env:KUBE_RAYLIB_ROOT="C:\Users\you\Documents\Repos\raylib-5.5_win64_mingw-w64"
+$env:KUBE_RAYLIB_ROOT="/path/to/raylib"
 poetry install
 ```
 
@@ -147,8 +147,8 @@ That is especially important for native acceleration work.
 
 When a contribution changes behavior, update the relevant docs in the same PR:
 
-- [README.md](/c:/Users/0rams/Documents/Coding/Projects/kube/README.md)
-- [WIKI.md](/c:/Users/0rams/Documents/Coding/Projects/kube/WIKI.md)
+- [README.md](https://github.com/ramsy0dev/kube/blob/main/README.md)
+- [WIKI.md](https://github.com/ramsy0dev/kube/blob/main/WIKI.md)
 - examples in `examples/`
 
 If a feature adds a new workflow, include at least one concrete example.

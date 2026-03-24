@@ -61,6 +61,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from kube import create_sharded, open_dataset
+from kube.integrations import available_backends
 
 
 class TinyCausalLM(nn.Module):
@@ -435,6 +436,8 @@ def main() -> None:
 
     dataset = open_dataset(dataset_path, mode="r")
     dataset_info = dataset.inspect()
+
+    print(f"backends: {', '.join(available_backends())}")
 
     if args.sequence_length is None:
         args.sequence_length = dataset.default_sequence_length

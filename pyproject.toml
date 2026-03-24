@@ -1,10 +1,23 @@
 [tool.poetry]
 name = "kube"
-version = "0.1.0"
+version = "0.0.1b1"
 description = "Spatial-native data system for face-addressable, memory-mapped datasets"
 authors = []
+license = "MIT"
 readme = "README.md"
 packages = [{ include = "kube" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Database",
+]
 include = [
     { path = "kube/**/*.so", format = "wheel" },
     { path = "kube/**/*.dll", format = "wheel" },
@@ -33,6 +46,7 @@ llm = ["tokenizers"]
 torch = ["tokenizers", "torch"]
 hf = ["datasets", "transformers", "tokenizers"]
 examples = ["datasets", "transformers", "tokenizers", "torch", "pyarrow"]
+all = ["pyarrow", "tokenizers", "torch", "datasets", "transformers"]
 
 [tool.poetry.build]
 script = "build.py"
