@@ -303,6 +303,104 @@ def _handle_export(args) -> None:
     )
 
 
+def _handle_export_arrow(args) -> None:
+    """Export a kube grid to an Arrow IPC file."""
+    log_event(args.logger, logging.INFO, "exporting kube to arrow", src=args.src, dst=args.dst)
+    with open_kube(args.src, mode="r") as kube:
+        bounds = None
+        if args.bounds:
+            bounds = _parse_bounds(args.bounds)
+        dst = kube.to_arrow(bounds, schema_mode=args.schema_mode)
+        import pyarrow as pa
+        import pyarrow.ipc as ipc
+        from pathlib import Path as _Path
+        out = _Path(args.dst)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with ipc.new_file(str(out), dst.schema) as writer:
+            writer.write_table(dst)
+        inspect_payload = kube.inspect()
+    payload = {
+        "operation": "export-arrow",
+        "src": str(args.src),
+        "dst": str(args.dst),
+        "schema_mode": args.schema_mode,
+        "rows": len(dst),
+        "grid_shape": inspect_payload["grid_shape"],
+    }
+    log_event(
+        args.logger,
+        logging.INFO,
+        "exported kube to arrow",
+        dst=args.dst,
+        rows=len(dst),
+        schema_mode=args.schema_mode,
+    )
+    _emit_optional_json(
+        args,
+        payload,
+        text_lines=[
+            f"Exported {args.src} -> {args.dst}  (Arrow IPC)",
+            f"Schema mode: {args.schema_mode}",
+            f"Rows: {len(dst)}",
+        ],
+    )
+
+
+def _handle_export_parquet(args) -> None:
+    """Export a kube grid to a Parquet file."""
+    log_event(args.logger, logging.INFO, "exporting kube to parquet", src=args.src, dst=args.dst)
+    with open_kube(args.src, mode="r") as kube:
+        bounds = None
+        if args.bounds:
+            bounds = _parse_bounds(args.bounds)
+        dst_path = kube.to_parquet(args.dst, bounds, schema_mode=args.schema_mode)
+        inspect_payload = kube.inspect()
+        import pyarrow.parquet as pq
+        pf = pq.read_metadata(str(dst_path))
+        row_count = pf.num_rows
+    payload = {
+        "operation": "export-parquet",
+        "src": str(args.src),
+        "dst": str(args.dst),
+        "schema_mode": args.schema_mode,
+        "compression": args.compression,
+        "rows": row_count,
+        "grid_shape": inspect_payload["grid_shape"],
+    }
+    log_event(
+        args.logger,
+        logging.INFO,
+        "exported kube to parquet",
+        dst=args.dst,
+        rows=row_count,
+        schema_mode=args.schema_mode,
+    )
+    _emit_optional_json(
+        args,
+        payload,
+        text_lines=[
+            f"Exported {args.src} -> {args.dst}  (Parquet)",
+            f"Schema mode: {args.schema_mode}",
+            f"Rows: {row_count}",
+        ],
+    )
+
+
+def _parse_bounds(text: str):
+    """Parse bounds string ``x0:x1,y0:y1,z0:z1`` into a bounds triple."""
+    parts = text.split(",")
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError("bounds must be x0:x1,y0:y1,z0:z1")
+    result = []
+    for part in parts:
+        lo, _, hi = part.partition(":")
+        try:
+            result.append((int(lo), int(hi)))
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError("bounds values must be integers") from exc
+    return tuple(result)
+
+
 def _handle_inspect(args) -> None:
     """Print kube metadata and storage stats as JSON."""
     log_event(args.logger, logging.INFO, "inspecting kube", path=args.path)
@@ -683,6 +781,62 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("dst", type=Path, help="destination file path")
     export_parser.set_defaults(func=_handle_export)
 
+    export_arrow_parser = _parser(
+        subparsers,
+        "export-arrow",
+        help_text="export a kube grid to an Arrow IPC file",
+        description="Decode a `.kube` grid and write it as an Arrow IPC (`.arrow` / `.ipc`) file.",
+        epilog="Example:\n  kube export-arrow data/demo.kube /tmp/demo.arrow --schema-mode wide_faces",
+    )
+    export_arrow_parser.add_argument("src", type=Path, help="source `.kube` file")
+    export_arrow_parser.add_argument("dst", type=Path, help="destination `.arrow` or `.ipc` file")
+    export_arrow_parser.add_argument(
+        "--schema-mode",
+        dest="schema_mode",
+        choices=("wide_faces", "long_faces", "cell_packed"),
+        default="wide_faces",
+        help="column layout for the exported table",
+    )
+    export_arrow_parser.add_argument(
+        "--bounds",
+        type=str,
+        default=None,
+        metavar="x0:x1,y0:y1,z0:z1",
+        help="optional spatial region to export",
+    )
+    export_arrow_parser.set_defaults(func=_handle_export_arrow)
+
+    export_parquet_parser = _parser(
+        subparsers,
+        "export-parquet",
+        help_text="export a kube grid to a Parquet file",
+        description="Decode a `.kube` grid and write it as a Parquet file.",
+        epilog="Example:\n  kube export-parquet data/demo.kube /tmp/demo.parquet --compression snappy",
+    )
+    export_parquet_parser.add_argument("src", type=Path, help="source `.kube` file")
+    export_parquet_parser.add_argument("dst", type=Path, help="destination `.parquet` file")
+    export_parquet_parser.add_argument(
+        "--schema-mode",
+        dest="schema_mode",
+        choices=("wide_faces", "long_faces", "cell_packed"),
+        default="wide_faces",
+        help="column layout for the exported table",
+    )
+    export_parquet_parser.add_argument(
+        "--compression",
+        choices=("snappy", "zstd", "none"),
+        default="snappy",
+        help="Parquet compression codec",
+    )
+    export_parquet_parser.add_argument(
+        "--bounds",
+        type=str,
+        default=None,
+        metavar="x0:x1,y0:y1,z0:z1",
+        help="optional spatial region to export",
+    )
+    export_parquet_parser.set_defaults(func=_handle_export_parquet)
+
     inspect_parser = _parser(
         subparsers,
         "inspect",
@@ -814,6 +968,18 @@ def build_parser() -> argparse.ArgumentParser:
     demo_parser.add_argument("--lod", default=1, type=int, help="viewer sampling stride")
     demo_parser.add_argument("--window-size", default=(1440, 900), type=_parse_window_size, metavar="WIDTHxHEIGHT", help="initial viewer window size")
     demo_parser.set_defaults(func=_handle_demo)
+
+    from kube.benchmark._cli import add_benchmark_parser, handle_benchmark
+
+    benchmark_parser = _parser(
+        subparsers,
+        "benchmark",
+        help_text="run the Kube performance benchmark suite",
+        description="Time Kube grid operations across multiple workloads and backends.",
+        epilog="Example:\n  kube benchmark --size 64 --iterations 5\n  kube benchmark --workloads random_read,mutation --output json",
+    )
+    add_benchmark_parser(benchmark_parser)
+    benchmark_parser.set_defaults(func=handle_benchmark)
 
     return parser
 

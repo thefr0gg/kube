@@ -10,6 +10,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from kube.metadata import (
+    FEATURE_SCHEMA,
+    PIPELINE_VERSION,
+    SEQUENCE_LENGTH,
+    SOURCE_DATASET,
+    SPLIT,
+    TOKENIZER_NAME,
+    TOKENIZER_PATH,
+)
+from kube.schemas import (
+    SCHEMA_CELL_PACKED,
+    SCHEMA_LONG_FACES,
+    SCHEMA_SUPERVISED,
+    SCHEMA_TOKEN_SEQUENCES,
+    SCHEMA_WIDE_FACES,
+)
 from kube.dataset import (
     ShardedKubeDataset,
     create_sharded,
@@ -98,10 +114,12 @@ def load(path, states: int = 4, shape=None) -> Kube:
 
 
 __all__ = [
+    # Core classes
     "Cell",
     "Kube",
     "ShardedKubeDataset",
     "Renderer",
+    # Convenience constructors
     "create",
     "create_sharded",
     "open",
@@ -114,7 +132,22 @@ __all__ = [
     "from_file",
     "from_polars",
     "load",
+    # Logging
     "configure_logging",
     "get_logger",
     "log_event",
+    # Schema constants
+    "SCHEMA_WIDE_FACES",
+    "SCHEMA_LONG_FACES",
+    "SCHEMA_CELL_PACKED",
+    "SCHEMA_SUPERVISED",
+    "SCHEMA_TOKEN_SEQUENCES",
+    # Metadata key constants
+    "SPLIT",
+    "TOKENIZER_NAME",
+    "TOKENIZER_PATH",
+    "SEQUENCE_LENGTH",
+    "FEATURE_SCHEMA",
+    "SOURCE_DATASET",
+    "PIPELINE_VERSION",
 ]

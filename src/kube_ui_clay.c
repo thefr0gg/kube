@@ -253,13 +253,13 @@ static void ui_button(Clay_ElementId id, const char *label, float width, Color f
     }
 }
 
-static void ui_chip(Clay_ElementId id, const char *label, Color fill, int active) {
+static void ui_chip(Clay_ElementId id, const char *label, Color fill, int active, float width) {
     int hovered = Clay_Hovered();
     Color border = active ? INVERSE : (hovered ? LINE : LINE_SOFT);
     Color bg = hovered && !active ? ColorAlpha(fill, 0.92f) : fill;
     CLAY(id, {
         .layout = {
-            .sizing = { .width = CLAY_SIZING_FIXED(28), .height = CLAY_SIZING_FIXED(24) },
+            .sizing = { .width = CLAY_SIZING_FIXED(width), .height = CLAY_SIZING_FIXED(24) },
             .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER }
         },
         .backgroundColor = clay_color(bg),
@@ -398,11 +398,20 @@ static void build_inspector(KubeUiState *state, const KubeUiFrameDesc *frame) {
                 }
                 CLAY_TEXT(CLAY_STRING("STATE CHIPS"), ui_text_config(TEXT, 16, CLAY_TEXT_WRAP_NONE));
                 if (frame->states <= 10) {
+                    /* Compute chip width so all chips fit within the inspector panel.
+                     * Available content width = panel width minus scroll padding (16+16).
+                     * Each inter-chip gap is 6px; there are (states-1) gaps. */
+                    static const float CHIP_GAP = 6.0f;
+                    static const float CHIP_MAX_W = 28.0f;
+                    float avail = (float)(KUBE_UI_INSPECTOR_W - 32);
+                    float chip_w = (avail - (frame->states - 1) * CHIP_GAP) / (float)frame->states;
+                    if (chip_w > CHIP_MAX_W) chip_w = CHIP_MAX_W;
+                    if (chip_w < 16.0f) chip_w = 16.0f;
                     CLAY(CLAY_ID("Inspector.Chips"), {
-                        .layout = { .childGap = 6, .layoutDirection = CLAY_LEFT_TO_RIGHT }
+                        .layout = { .childGap = (int)CHIP_GAP, .layoutDirection = CLAY_LEFT_TO_RIGHT }
                     }) {
                         for (int value = 0; value < frame->states; value++) {
-                            ui_chip(CLAY_IDI("Inspector.Chip", value), state->chip_labels[value], color_for_state(value, frame->states), value == frame->selected_face_values[frame->sel_face]);
+                            ui_chip(CLAY_IDI("Inspector.Chip", value), state->chip_labels[value], color_for_state(value, frame->states), value == frame->selected_face_values[frame->sel_face], chip_w);
                         }
                     }
                 } else {

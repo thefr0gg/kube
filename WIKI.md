@@ -1227,9 +1227,166 @@ Open the viewer in a narrow debug slice:
 kube view data/sample.kube --slice x=8 --lod 2 --read-only
 ```
 
+## Universal Data Backend
+
+Kube can act as a drop-in backend for existing data pipelines via a set of thin interop layers that build on the existing Polars-first architecture.
+
+### Architecture
+
+Every conversion follows the same routing path:
+
+```
+Kube → to_polars() → Polars → target format
+```
+
+Polars uses Arrow-native memory internally, so `to_arrow()` is near-zero-copy and all other conversions build on top of it.
+
+### Schema modes
+
+Three column layouts are available for table exports:
+
+| Mode constant | Columns | Rows per cell |
+|---|---|---|
+| `SCHEMA_WIDE_FACES` | `x, y, z, face_0..face_5` | 1 |
+| `SCHEMA_LONG_FACES` | `x, y, z, face, value` | 6 (melted) |
+| `SCHEMA_CELL_PACKED` | `x, y, z, packed` | 1 |
+
+```python
+from kube.schemas import SCHEMA_WIDE_FACES, schema_columns
+
+cols = schema_columns(SCHEMA_WIDE_FACES, states=4)
+# Returns {'x': 'UInt32', ..., 'face_0': 'UInt8', ..., 'face_5': 'UInt8'}
+```
+
+### Metadata key constants
+
+`kube.metadata` contains string constants for the standard metadata keys used in `.kube` headers and `.kubed` manifests:
+
+```python
+from kube.metadata import SPLIT, TOKENIZER_NAME, SEQUENCE_LENGTH
+kube.update_metadata({SPLIT: "train", SEQUENCE_LENGTH: 1024})
+```
+
+### Protocol
+
+`kube.protocol.KubeBackend` is a structural `Protocol` (PEP 544) that describes the minimum interface any Kube-compatible backend must expose. It is `@runtime_checkable` so `isinstance(kube, KubeBackend)` works:
+
+```python
+from kube.protocol import KubeBackend
+assert isinstance(kube, KubeBackend)
+```
+
+### Arrow and Parquet
+
+Requires `pyarrow` (`pip install pyarrow` or `poetry install -E arrow`):
+
+```python
+table = kube.to_arrow()                            # wide_faces layout
+table = kube.to_arrow(schema_mode="long_faces")    # melted
+kube.to_parquet("out.parquet")
+kube2 = Kube.from_arrow(table, shape=(8,8,8), states=4)
+```
+
+CLI:
+
+```bash
+kube export-arrow data/train.kube out.arrow
+kube export-parquet data/train.kube out.parquet --schema-mode long_faces --compression zstd
+```
+
+### NumPy
+
+```python
+arr = kube.faces_to_numpy()        # (W, H, D, 6) — uint8/uint16 dtype
+flat = kube.to_numpy()             # (N, 6)
+packed = kube.to_numpy(packed=True)  # (N,) packed integers
+arr = np.array(kube)               # same as faces_to_numpy via __array__
+```
+
+Functional helpers in `kube.integrations.numpy_compat`:
+
+```python
+from kube.integrations.numpy_compat import faces_to_numpy, kube_from_numpy
+arr = faces_to_numpy(kube)
+restored = kube_from_numpy(arr, states=4)
+```
+
+### Pandas
+
+```python
+df = kube.to_pandas()
+kube2 = Kube.from_pandas(df, shape=(8,8,8), states=4)
+```
+
+### sklearn
+
+```python
+X, y = kube.to_sklearn_xy(target_face=0)   # X shape (N, 5), y shape (N,)
+```
+
+Spatial train/test split (avoids adjacent-cell leakage):
+
+```python
+from kube.integrations.sklearn import spatial_train_test_split
+X_tr, X_te, y_tr, y_te = spatial_train_test_split(kube, target_face=0, test_axis=2)
+```
+
+### PyTorch
+
+Three map-style Dataset classes are now available alongside the existing `KubeCausalLMIterableDataset`:
+
+- `KubeDataset(kube)` — materialises `feature_frame()` once; each item is `{"features": Tensor}`
+- `KubeRegionDataset(kube, bounds, tile_shape)` — iterates tiles; each item is a `(tw, th, td, 6)` Tensor
+- `KubeSupervisedDataset(kube, target_face)` — each item is `(features_tensor, target_tensor)`
+
+Utility functions:
+
+```python
+from kube.integrations.torch import collate_kube_batch, to_torch
+
+tensors = to_torch(kube)            # dict: {"face_0": Tensor, ..., "face_5": Tensor}
+batch = collate_kube_batch(samples) # stack a list of sample dicts into batched tensors
+```
+
+### HuggingFace
+
+Requires `datasets` (`poetry install -E hf`):
+
+```python
+from kube.integrations.hf import to_hf_dataset, to_hf_iterable_dataset
+
+# Grid kube → in-memory Dataset
+hf_ds = to_hf_dataset(kube)
+
+# Sharded corpus → streaming IterableDataset
+it_ds = to_hf_iterable_dataset(sharded_dataset, sequence_length=1024)
+```
+
+`ShardedKubeDataset` also exposes `.to_hf_dataset(...)` and `.to_hf_iterable_dataset(...)` directly.
+
+### Data collator
+
+`KubeDataCollatorForCausalLM` pads a list of samples to uniform length and returns `{input_ids, attention_mask, labels}` tensors, compatible with HuggingFace `Trainer`:
+
+```python
+from kube.dataset import KubeDataCollatorForCausalLM
+
+collator = KubeDataCollatorForCausalLM(pad_token_id=0)
+trainer = Trainer(..., data_collator=collator)
+```
+
+### Check available backends at runtime
+
+```python
+from kube.integrations import available_backends
+print(available_backends())   # e.g. ['arrow', 'numpy', 'pandas']
+```
+
 ## Testing Coverage
 
-`tests/test_kube.py` currently covers the storage layer more than the renderer.
+`tests/test_kube.py` covers the core storage layer.
+`tests/test_dataset.py` covers the sharded dataset layer.
+`tests/test_interop.py` covers the universal data backend interop layer.
 
 Covered areas include:
 
@@ -1243,6 +1400,23 @@ Covered areas include:
 - batch iteration
 - supervised-frame helpers
 - basic view argument validation
+- schema constants and `schema_columns()`
+- metadata key constants
+- `KubeBackend` protocol structural checks
+- `to_arrow` / `from_arrow` round-trips (wide_faces, long_faces, cell_packed)
+- `to_numpy` / `faces_to_numpy` shape and dtype checks
+- `__array__` protocol
+- `numpy_compat` module functional helpers
+- `kube_from_numpy` round-trip
+- `to_pandas` / `from_pandas` round-trips
+- `to_parquet` / `region_to_parquet` with multiple schema modes
+- `to_sklearn_xy` shapes across all target faces
+- `spatial_train_test_split` coverage and error paths
+- HuggingFace import guards (when `datasets` is not installed)
+- `ShardedKubeDataset.to_arrow`, `to_parquet`, `iter_lm_batches`
+- `KubeDataCollatorForCausalLM` padding, mask, label pad
+- `integrations.available_backends()` and `_check_*` helpers
+- `export-arrow` and `export-parquet` CLI subcommands (all schema modes)
 
 The native storage engine is validated indirectly through the Python runtime and
 the automated core/dataset tests, while the native renderer itself is still
@@ -1270,6 +1444,12 @@ If you are deciding which API or workflow to use, this is the short version:
 - use `to_polars(...)` or `feature_frame(...)` for analytics and feature extraction
 - use `supervised_frame(...)` or `iter_supervised_batches(...)` when one face is the label
 - use `from_polars(...)` when a transform step already produced a table
+- use `to_arrow(...)` or `to_parquet(...)` when the downstream tool speaks Arrow or Parquet
+- use `faces_to_numpy()` or `np.array(kube)` when you need a spatial NumPy array
+- use `to_sklearn_xy(...)` when you want to hand data directly to a sklearn estimator
+- use `spatial_train_test_split(...)` instead of random splits to avoid leakage
+- use `to_hf_dataset(...)` or `to_hf_iterable_dataset(...)` to feed a HuggingFace Trainer
+- use `kube export-arrow` or `kube export-parquet` for one-shot CLI exports
 - use `examples/train_kube_lm.py` as the simplest starting point for Torch-based LM experiments on `.kubed`
 - use `kube view` or `Kube.view(...)` when human inspection or editing is part of the workflow
 - use `.kubed` dataset APIs when the problem is really token-sequence storage and iteration rather than cube inspection

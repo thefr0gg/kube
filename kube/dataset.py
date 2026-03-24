@@ -923,6 +923,187 @@ class ShardedKubeDataset:
             )
 
 
+    # ------------------------------------------------------------------
+    # Interop: Arrow / Parquet / HuggingFace
+    # ------------------------------------------------------------------
+
+    def to_arrow(self, sequence_length: int, count: int | None = None):
+        """Materialise sequence windows as a PyArrow Table.
+
+        Columns: ``input_ids``, ``target_ids``, ``shard_index``,
+        ``token_offset``.
+
+        Args:
+            sequence_length: Token window size.
+            count: Maximum number of sequences to include; ``None`` means all.
+
+        Returns:
+            A ``pyarrow.Table``.
+        """
+        try:
+            import pyarrow as pa  # noqa: F401
+        except ImportError as exc:
+            raise ImportError("pyarrow is required: pip install pyarrow") from exc
+
+        import polars as pl
+
+        rows: dict[str, list] = {
+            "input_ids": [],
+            "target_ids": [],
+            "shard_index": [],
+            "token_offset": [],
+        }
+        for i, sample in enumerate(self.iter_sequences(sequence_length)):
+            if count is not None and i >= count:
+                break
+            rows["input_ids"].append(sample["input_ids"])
+            rows["target_ids"].append(sample["target_ids"])
+            rows["shard_index"].append(sample["shard_index"])
+            rows["token_offset"].append(sample["token_offset"])
+        return pl.DataFrame(rows).to_arrow()
+
+    def to_parquet(self, path, sequence_length: int, count: int | None = None) -> "Path":
+        """Write sequence windows to a Parquet file via ``to_arrow``."""
+        try:
+            import pyarrow.parquet as pq
+        except ImportError as exc:
+            raise ImportError("pyarrow is required: pip install pyarrow") from exc
+
+        dst = Path(path)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        pq.write_table(self.to_arrow(sequence_length, count), str(dst))
+        return dst
+
+    def to_hf_dataset(self, sequence_length: int, count: int | None = None, **kwargs):
+        """Convert to a HuggingFace in-memory ``datasets.Dataset``.
+
+        Requires the ``datasets`` optional dependency.
+        """
+        try:
+            from datasets import Dataset
+        except ImportError as exc:
+            raise ImportError(
+                "datasets is required: pip install datasets"
+            ) from exc
+
+        table = self.to_arrow(sequence_length, count)
+        return Dataset(table, **kwargs)
+
+    def to_hf_iterable_dataset(
+        self,
+        sequence_length: int,
+        *,
+        stride: int | None = None,
+        format_keys: tuple[str, ...] = ("input_ids", "attention_mask", "labels"),
+    ):
+        """Wrap this dataset as a streaming HuggingFace ``IterableDataset``.
+
+        Requires the ``datasets`` optional dependency.
+        """
+        try:
+            from datasets import IterableDataset
+        except ImportError as exc:
+            raise ImportError(
+                "datasets is required: pip install datasets"
+            ) from exc
+
+        parent = self
+
+        def _gen():
+            for sample in parent.iter_sequences(sequence_length, stride=stride):
+                ids = sample["input_ids"]
+                yield {
+                    "input_ids": ids,
+                    "attention_mask": [1] * len(ids),
+                    "labels": sample["target_ids"],
+                }
+
+        return IterableDataset.from_generator(_gen)
+
+    def iter_lm_batches(
+        self,
+        batch_size: int,
+        sequence_length: int,
+        *,
+        stride: int | None = None,
+        pad_token_id: int = 0,
+        drop_last: bool = True,
+    ):
+        """Yield padded causal-LM batches with attention masks.
+
+        Each yielded dict has keys ``input_ids``, ``attention_mask``, and
+        ``labels`` — compatible with HuggingFace ``Trainer``.
+        """
+        batch: list[dict] = []
+        for sample in self.iter_sequences(sequence_length, stride=stride, drop_last=drop_last):
+            batch.append(sample)
+            if len(batch) >= batch_size:
+                max_len = max(len(s["input_ids"]) for s in batch)
+                input_ids, attention_mask, labels = [], [], []
+                for s in batch:
+                    ids = s["input_ids"]
+                    tgt = s["target_ids"]
+                    pad = max_len - len(ids)
+                    input_ids.append(ids + [pad_token_id] * pad)
+                    attention_mask.append([1] * len(ids) + [0] * pad)
+                    labels.append(tgt + [-100] * pad)
+                yield {
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask,
+                    "labels": labels,
+                }
+                batch = []
+
+
+class KubeDataCollatorForCausalLM:
+    """HuggingFace-compatible data collator for causal LM training.
+
+    Usage::
+
+        collator = KubeDataCollatorForCausalLM(pad_token_id=tokenizer.pad_token_id)
+        trainer = Trainer(..., data_collator=collator)
+
+    Attributes:
+        pad_token_id: Token ID used to right-pad shorter sequences.
+        label_pad_id: Value used to pad the ``labels`` tensor (default −100,
+            which ``CrossEntropyLoss`` ignores automatically).
+    """
+
+    def __init__(self, pad_token_id: int = 0, label_pad_id: int = -100) -> None:
+        self.pad_token_id = int(pad_token_id)
+        self.label_pad_id = int(label_pad_id)
+
+    def __call__(self, samples: list[dict]) -> dict:
+        """Pad *samples* to uniform length and return batched tensors.
+
+        If PyTorch is available the result values are ``torch.Tensor``
+        instances; otherwise plain Python lists are returned.
+        """
+        try:
+            import torch
+            _torch = torch
+        except ImportError:
+            _torch = None
+
+        max_len = max(len(s["input_ids"]) for s in samples)
+        input_ids, attention_mask, labels = [], [], []
+        for s in samples:
+            ids = list(s["input_ids"])
+            tgt = list(s.get("labels", s.get("target_ids", [])))
+            pad = max_len - len(ids)
+            input_ids.append(ids + [self.pad_token_id] * pad)
+            attention_mask.append([1] * len(ids) + [0] * pad)
+            labels.append(tgt + [self.label_pad_id] * pad)
+
+        if _torch is not None:
+            return {
+                "input_ids": _torch.tensor(input_ids, dtype=_torch.long),
+                "attention_mask": _torch.tensor(attention_mask, dtype=_torch.long),
+                "labels": _torch.tensor(labels, dtype=_torch.long),
+            }
+        return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+
+
 def create_sharded(
     root: str | Path,
     *,

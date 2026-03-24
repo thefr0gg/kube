@@ -168,6 +168,9 @@ class CompiledFaceBatch:
     values: ctypes.Array
     count: int
 
+    def __repr__(self) -> str:
+        return f"CompiledFaceBatch(count={self.count:,})"
+
 
 def _load_storage_accelerator() -> _StorageAccelerator:
     """Load the required native storage engine once for the whole process."""
@@ -406,6 +409,13 @@ class PackedBuffer:
         if self._file_handle is not None:
             self._file_handle.close()
 
+    def __repr__(self) -> str:
+        mode = "mapped" if self._is_mapped else "memory"
+        return (
+            f"PackedBuffer(shape={self.shape}, itemsize={self.itemsize}, "
+            f"nbytes={self.nbytes:,}, mode={mode!r})"
+        )
+
 
 def _pack_stream_to_values(data: bytes, bits_per_face: int) -> list[int]:
     """Pack a logical byte stream into Kube packed-cell integers.
@@ -553,6 +563,13 @@ class Cell:
         mask = states - 1
         faces = [(int(packed) >> (index * bits_per_face)) & mask for index in range(6)]
         return cls(states, faces)
+
+    def __repr__(self) -> str:
+        return f"Cell(states={self.states}, faces={self.faces})"
+
+    def __str__(self) -> str:
+        face_str = " ".join(f"f{i}={v}" for i, v in enumerate(self.faces))
+        return f"Cell(S={self.states} | {face_str})"
 
 
 class Kube:
@@ -1635,6 +1652,16 @@ class Kube:
             f"storage={stats['storage']})"
         )
 
+    def __str__(self) -> str:
+        """Return a concise human-readable summary of this kube."""
+        path_part = f", path={self.path.name!r}" if self.path is not None else ""
+        return (
+            f"Kube {self.W}×{self.H}×{self.D}  "
+            f"S={self.S} states  {self.B}b/face  "
+            f"{self.cell_count:,} cells  "
+            f"{self.data.nbytes:,}B {self.dtype}{path_part}"
+        )
+
     def view(
         self,
         *,
@@ -1662,3 +1689,240 @@ class Kube:
             slice_index=slice_index,
             lod=lod,
         ).run()
+
+    # ------------------------------------------------------------------
+    # Interop: Arrow / Parquet / NumPy / Pandas / sklearn
+    # ------------------------------------------------------------------
+
+    def schema(self, mode: str = "wide_faces") -> dict:
+        """Return ``{column_name: dtype_str}`` for the given schema mode.
+
+        The method exists so downstream tools can introspect expected column
+        layouts without materialising any data.
+        """
+        from kube.schemas import schema_columns
+        return schema_columns(mode, self.S)
+
+    def to_arrow(self, bounds=None, *, schema_mode: str = "wide_faces"):
+        """Convert the kube (or a bounded region) to a PyArrow Table.
+
+        Routing: ``to_polars(bounds)`` → ``polars.DataFrame.to_arrow()``.
+        Near-zero-copy because Polars uses Arrow-native memory internally.
+
+        Args:
+            bounds: Optional ``((x0,x1),(y0,y1),(z0,z1))`` region; ``None``
+                means the full cube.
+            schema_mode: One of ``"wide_faces"``, ``"long_faces"``,
+                ``"cell_packed"``.  Determines which columns are exported.
+
+        Returns:
+            A ``pyarrow.Table`` with the requested column layout.
+        """
+        try:
+            import pyarrow as pa  # noqa: F401
+        except ImportError as exc:
+            raise ImportError("pyarrow is required: pip install pyarrow") from exc
+
+        from kube.schemas import (
+            SCHEMA_CELL_PACKED,
+            SCHEMA_LONG_FACES,
+            SCHEMA_WIDE_FACES,
+        )
+
+        if schema_mode == SCHEMA_WIDE_FACES:
+            frame = self.to_polars(bounds, include_coords=True, include_packed=False, include_faces=True)
+        elif schema_mode == SCHEMA_CELL_PACKED:
+            frame = self.to_polars(bounds, include_coords=True, include_packed=True, include_faces=False)
+        elif schema_mode == SCHEMA_LONG_FACES:
+            wide = self.to_polars(bounds, include_coords=True, include_packed=False, include_faces=True)
+            frame = wide.unpivot(
+                index=["x", "y", "z"],
+                on=list(self.face_columns),
+                variable_name="face",
+                value_name="value",
+            ).with_columns(
+                pl.col("face").str.extract(r"(\d+)$").cast(pl.UInt8).alias("face")
+            ).sort(["x", "y", "z", "face"])
+        else:
+            raise ValueError(f"unknown schema_mode {schema_mode!r}")
+
+        return frame.to_arrow()
+
+    def region_to_arrow(self, bounds):
+        """Thin alias for ``to_arrow(bounds)``."""
+        return self.to_arrow(bounds)
+
+    @classmethod
+    def from_arrow(
+        cls,
+        table,
+        *,
+        shape,
+        states: int = 4,
+        path=None,
+        metadata: dict | None = None,
+    ) -> "Kube":
+        """Reconstruct a kube from a PyArrow Table.
+
+        The classmethod exists to close the loop for Arrow-first pipelines.
+        It delegates to ``from_polars`` via ``polars.from_arrow``.
+        """
+        try:
+            pass  # pyarrow is imported implicitly by polars
+        except ImportError:
+            pass
+        frame = pl.from_arrow(table)
+        return cls.from_polars(frame, shape=shape, states=states, path=path, metadata=metadata)
+
+    def to_numpy(self, bounds=None, *, packed: bool = False):
+        """Convert the kube to a 2-D NumPy array.
+
+        Args:
+            bounds: Optional region bounds.  ``None`` means the full cube.
+            packed: If ``True``, return a 1-D array of packed cell integers
+                instead of a ``(N, 6)`` face matrix.
+
+        Returns:
+            ``np.ndarray`` of shape ``(N,)`` (packed) or ``(N, 6)`` (faces).
+        """
+        try:
+            import numpy as np
+        except ImportError as exc:
+            raise ImportError("numpy is required: pip install numpy") from exc
+
+        if packed:
+            frame = self.to_polars(bounds, include_coords=False, include_packed=True, include_faces=False)
+            return frame["packed"].to_numpy()
+
+        frame = self.to_polars(bounds, include_coords=False, include_packed=False, include_faces=True)
+        return np.stack([frame[col].to_numpy() for col in self.face_columns], axis=1)
+
+    def faces_to_numpy(self, order: str = "xyzf"):
+        """Return a ``(W, H, D, 6)`` array of face values.
+
+        The method iterates all cells in x,y,z order and builds a contiguous
+        numpy array, then reshapes it.  Not zero-copy due to bit-packed storage.
+
+        Args:
+            order: Axis order string.  Only ``"xyzf"`` is supported currently.
+
+        Returns:
+            ``np.ndarray`` of shape ``(W, H, D, 6)``, dtype ``uint8`` when
+            ``states <= 256``, ``uint16`` when ``states <= 65536``, otherwise
+            ``uint32``.
+        """
+        try:
+            import numpy as np
+        except ImportError as exc:
+            raise ImportError("numpy is required: pip install numpy") from exc
+
+        if self.S <= 256:
+            dtype = np.uint8
+        elif self.S <= 65536:
+            dtype = np.uint16
+        else:
+            dtype = np.uint32
+
+        arr = np.empty((self.W * self.H * self.D, 6), dtype=dtype)
+        frame = self.to_polars(None, include_coords=False, include_packed=False, include_faces=True)
+        for i, col in enumerate(self.face_columns):
+            arr[:, i] = frame[col].to_numpy().astype(dtype)
+        return arr.reshape(self.W, self.H, self.D, 6)
+
+    def region_to_numpy(self, bounds):
+        """Return a ``(N, 6)`` face array for the cells in *bounds*."""
+        return self.to_numpy(bounds, packed=False)
+
+    def __array__(self, dtype=None, copy=None):
+        """Support ``np.array(kube)`` by delegating to ``faces_to_numpy()``.
+
+        Note: this always involves a copy because cell data is bit-packed.
+        The *copy* parameter is accepted for NumPy 2.0 compatibility but is
+        ignored — a copy is always produced.
+        """
+        arr = self.faces_to_numpy()
+        if dtype is not None:
+            try:
+                import numpy as np
+            except ImportError as exc:
+                raise ImportError("numpy is required: pip install numpy") from exc
+            return arr.astype(dtype)
+        return arr
+
+    def to_pandas(self, bounds=None):
+        """Convert the kube (or a region) to a Pandas DataFrame.
+
+        Delegates to ``to_polars(...).to_pandas()``; requires ``pandas``.
+        """
+        return self.to_polars(bounds, include_coords=True, include_packed=False, include_faces=True).to_pandas()
+
+    @classmethod
+    def from_pandas(
+        cls,
+        df,
+        *,
+        shape,
+        states: int = 4,
+        path=None,
+        metadata: dict | None = None,
+    ) -> "Kube":
+        """Build a kube from a Pandas DataFrame.
+
+        Delegates to ``from_polars(pl.from_pandas(df))``.
+        """
+        frame = pl.from_pandas(df)
+        return cls.from_polars(frame, shape=shape, states=states, path=path, metadata=metadata)
+
+    def to_parquet(self, path, bounds=None, *, schema_mode: str = "wide_faces") -> Path:
+        """Write the kube (or a region) to a Parquet file.
+
+        Args:
+            path: Destination file path.
+            bounds: Optional region bounds.
+            schema_mode: Column layout; see ``SCHEMA_*`` constants.
+
+        Returns:
+            The resolved ``Path`` of the written file.
+        """
+        dst = Path(path)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        table = self.to_arrow(bounds, schema_mode=schema_mode)
+        import pyarrow.parquet as pq
+        pq.write_table(table, str(dst))
+        return dst
+
+    def region_to_parquet(self, bounds, path) -> Path:
+        """Thin alias for ``to_parquet(path, bounds)``."""
+        return self.to_parquet(path, bounds)
+
+    def to_sklearn_xy(self, target_face: int, bounds=None):
+        """Return ``(X, y)`` numpy arrays ready for sklearn estimators.
+
+        The method delegates to ``supervised_frame()`` and converts the
+        resulting Polars columns to numpy.
+
+        Args:
+            target_face: Index (0–5) of the face to use as the label column.
+            bounds: Optional region bounds.
+
+        Returns:
+            Tuple ``(X, y)`` where ``X`` has shape ``(N, 5)`` and ``y`` has
+            shape ``(N,)``.
+        """
+        try:
+            import numpy as np
+        except ImportError as exc:
+            raise ImportError("numpy is required: pip install numpy") from exc
+
+        frame = self.supervised_frame(
+            target_face,
+            bounds,
+            include_coords=False,
+            include_packed=False,
+            target_name="target",
+            drop_target_face=True,
+        )
+        feature_cols = [c for c in frame.columns if c != "target"]
+        X = np.stack([frame[col].to_numpy() for col in feature_cols], axis=1)
+        y = frame["target"].to_numpy()
+        return X, y

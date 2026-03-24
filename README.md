@@ -128,6 +128,12 @@ This installs the core dependency set, including:
 
 Kube keeps the heavier ML and Hugging Face dependencies optional.
 
+Install Arrow/Parquet support:
+
+```bash
+poetry install -E arrow
+```
+
 Install the Hugging Face/text-import stack:
 
 ```bash
@@ -148,6 +154,7 @@ poetry install -E examples
 
 The current optional extras are:
 
+- `arrow`: Arrow IPC and Parquet export via `pyarrow`
 - `llm`: built-in tokenization support via `tokenizers`
 - `torch`: torch integration plus tokenizers
 - `hf`: Hugging Face dataset/tokenizer helpers
@@ -244,6 +251,20 @@ Export bytes back out:
 
 ```bash
 kube export data/large.kube restored.bin
+```
+
+Export the grid as Arrow IPC:
+
+```bash
+kube export-arrow data/large.kube out.arrow
+kube export-arrow data/large.kube out.arrow --schema-mode cell_packed
+```
+
+Export the grid as Parquet:
+
+```bash
+kube export-parquet data/large.kube out.parquet
+kube export-parquet data/large.kube out.parquet --schema-mode long_faces --compression zstd
 ```
 
 Compute per-face histograms:
@@ -353,6 +374,54 @@ features = kube.feature_frame(include_coords=True, include_packed=False)
 for batch in kube.iter_batches(1024, include_packed=False):
     # Send each batch into your preprocessing or training code.
     print(batch.shape)
+```
+
+### Interop with NumPy, Arrow, Parquet, Pandas, and sklearn
+
+```python
+import numpy as np
+from kube import Kube
+
+kube = Kube(8, 8, 8, states=4)
+
+# NumPy — (W, H, D, 6) array of face values
+arr = kube.faces_to_numpy()          # shape (8, 8, 8, 6), dtype uint8
+arr = np.array(kube)                 # same, via __array__ protocol
+
+# Arrow — zero-copy via Polars' Arrow-native memory model
+table = kube.to_arrow()              # pa.Table with face_0..face_5 columns
+table = kube.to_arrow(schema_mode="long_faces")   # melted N×6 rows
+table = kube.to_arrow(schema_mode="cell_packed")  # packed integer column
+
+# Parquet
+kube.to_parquet("out.parquet")
+kube.to_parquet("region.parquet", bounds=((0, 4), (0, 4), (0, 4)))
+
+# Pandas
+df = kube.to_pandas()
+
+# sklearn — get (X, y) feature/label arrays
+X, y = kube.to_sklearn_xy(target_face=0)   # X shape (N, 5), y shape (N,)
+
+# Round-trips
+from kube.model import Kube
+kube2 = Kube.from_arrow(table, shape=(8, 8, 8), states=4)
+kube3 = Kube.from_pandas(df, shape=(8, 8, 8), states=4)
+```
+
+Functional-style helpers live in `kube.integrations`:
+
+```python
+from kube.integrations.numpy_compat import faces_to_numpy, kube_from_numpy, packed_to_numpy
+from kube.integrations.sklearn import to_sklearn_xy, spatial_train_test_split
+from kube.integrations.hf import to_hf_dataset, to_hf_iterable_dataset
+
+# Spatial split avoids leakage from adjacent cells
+X_tr, X_te, y_tr, y_te = spatial_train_test_split(kube, target_face=0, test_axis=2)
+
+# HuggingFace (requires datasets extra)
+hf_ds = to_hf_dataset(kube)                           # in-memory Dataset
+it_ds = to_hf_iterable_dataset(sharded_ds, seq_len=256)  # streaming
 ```
 
 ### Analytics and supervised-learning helpers
@@ -510,6 +579,15 @@ Important `Kube` methods:
 - `update_metadata(...)`
 - `flush()`
 - `view(...)`
+- `schema(mode)` — column names + dtypes for a schema mode
+- `to_arrow(bounds, schema_mode)` — PyArrow Table
+- `from_arrow(table, shape, states)` — classmethod
+- `to_numpy(bounds, packed)` — NumPy array
+- `faces_to_numpy()` — `(W, H, D, 6)` array
+- `to_pandas(bounds)` — Pandas DataFrame
+- `from_pandas(df, shape, states)` — classmethod
+- `to_parquet(path, bounds, schema_mode)` — Parquet file
+- `to_sklearn_xy(target_face, bounds)` — `(X, y)` arrays
 
 Important `ShardedKubeDataset` methods:
 
@@ -526,6 +604,11 @@ Important `ShardedKubeDataset` methods:
 - `load_resume_state(...)`
 - `sample_sequences_frame(...)`
 - `export_stats_parquet(...)`
+- `to_arrow(sequence_length, count)` — PyArrow Table of sequences
+- `to_parquet(path, sequence_length, count)` — Parquet file
+- `to_hf_dataset(sequence_length, count)` — HuggingFace Dataset
+- `to_hf_iterable_dataset(sequence_length)` — streaming IterableDataset
+- `iter_lm_batches(batch_size, sequence_length)` — padded LM batches
 
 ## Machine Learning And Data Pipeline Use
 
@@ -591,6 +674,11 @@ The built-in Python console now supports:
 
 - The Python library depends on `polars`.
 - Built-in text tokenization uses the optional `tokenizers` dependency.
+- Arrow and Parquet export require the optional `pyarrow` dependency (`pip install pyarrow` or `poetry install -E arrow`).
+- NumPy interop requires `numpy`. Pandas interop requires `pandas`. These are not declared as extras because they are typically already present in data/ML environments.
 - The optional torch adapter lives in `kube.integrations.torch`.
+- The optional HuggingFace adapter lives in `kube.integrations.hf` (requires `datasets`).
+- The sklearn spatial split helper lives in `kube.integrations.sklearn` (requires `numpy`; scikit-learn itself is not a hard dependency).
+- `kube.integrations.available_backends()` lists which optional backends are currently importable.
 - The renderer requires building the native `kube_renderer` library.
 - The current visualization path focuses on shell and slice interaction for large files, not full volumetric rendering.

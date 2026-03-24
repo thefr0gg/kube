@@ -156,6 +156,135 @@ dataset = open_dataset("datasets/corpus.kubed")
 torch_dataset = KubeCausalLMIterableDataset(dataset, sequence_length=2048)
 ```
 
+### 10. Export to Arrow or Parquet
+
+```python
+from kube import open as open_kube
+
+with open_kube("datasets/train.kube", mode="r") as kube:
+    # Arrow IPC — near-zero-copy via Polars' Arrow-native memory
+    table = kube.to_arrow()                             # pa.Table, wide_faces layout
+    table = kube.to_arrow(schema_mode="long_faces")     # melted N×6 rows
+    table = kube.to_arrow(schema_mode="cell_packed")    # single packed-int column
+
+    # Parquet
+    kube.to_parquet("out/train.parquet")
+    kube.to_parquet("out/region.parquet", bounds=((0, 32), (0, 32), (0, 16)))
+```
+
+Schema modes:
+
+| Mode | Columns | Rows |
+|------|---------|------|
+| `wide_faces` (default) | `x, y, z, face_0..face_5` | N (one per cell) |
+| `long_faces` | `x, y, z, face, value` | N×6 (one per face) |
+| `cell_packed` | `x, y, z, packed` | N (packed integer) |
+
+### 11. Export to NumPy
+
+```python
+import numpy as np
+from kube import open as open_kube
+
+with open_kube("datasets/train.kube", mode="r") as kube:
+    # (W, H, D, 6) spatial array
+    arr = kube.faces_to_numpy()
+
+    # (N, 6) flat array — same data, no reshape
+    flat = kube.to_numpy()
+
+    # NumPy array protocol — np.array(kube) works too
+    arr2 = np.array(kube)
+
+    # Bounded region
+    region = kube.region_to_numpy(((0, 8), (0, 8), (0, 8)))
+```
+
+Functional equivalents are available in `kube.integrations.numpy_compat`:
+
+```python
+from kube.integrations.numpy_compat import faces_to_numpy, kube_from_numpy, packed_to_numpy
+
+arr = faces_to_numpy(kube)          # (W, H, D, 6)
+packed = packed_to_numpy(kube)      # 1-D packed integers
+
+# Round-trip: numpy array → Kube
+restored = kube_from_numpy(arr, states=4)
+```
+
+### 12. sklearn-compatible (X, y) arrays and spatial splitting
+
+```python
+from kube.integrations.sklearn import to_sklearn_xy, spatial_train_test_split
+
+X, y = to_sklearn_xy(kube, target_face=3)   # X shape (N, 5), y shape (N,)
+
+# Split along a spatial axis to avoid adjacent-cell leakage
+X_train, X_test, y_train, y_test = spatial_train_test_split(
+    kube,
+    target_face=3,
+    test_axis=2,       # split along z-axis
+    test_fraction=0.2,
+)
+```
+
+### 13. Export a sharded dataset to HuggingFace
+
+```python
+from kube import open_dataset
+from kube.integrations.hf import to_hf_dataset, to_hf_iterable_dataset
+
+dataset = open_dataset("datasets/corpus.kubed")
+
+# In-memory Dataset (materialises all windows)
+hf_ds = dataset.to_hf_dataset(sequence_length=1024, count=10_000)
+
+# Streaming IterableDataset (no materialisation)
+it_ds = dataset.to_hf_iterable_dataset(sequence_length=1024)
+
+# Or use the module-level helper
+it_ds2 = to_hf_iterable_dataset(dataset, sequence_length=1024)
+```
+
+### 14. HuggingFace Trainer-compatible data collator
+
+```python
+from kube.dataset import KubeDataCollatorForCausalLM
+
+collator = KubeDataCollatorForCausalLM(pad_token_id=tokenizer.pad_token_id)
+
+# Use with HuggingFace Trainer
+from transformers import Trainer
+trainer = Trainer(
+    model=model,
+    train_dataset=it_ds,
+    data_collator=collator,
+)
+```
+
+### 15. Schema and metadata constants
+
+```python
+from kube.schemas import SCHEMA_WIDE_FACES, SCHEMA_LONG_FACES, schema_columns
+from kube.metadata import SPLIT, TOKENIZER_NAME, SEQUENCE_LENGTH
+
+# Inspect expected column layout before exporting
+cols = schema_columns(SCHEMA_WIDE_FACES, states=4)
+# {'x': 'UInt32', 'y': 'UInt32', 'z': 'UInt32',
+#  'face_0': 'UInt8', ..., 'face_5': 'UInt8'}
+
+# Use as standard metadata keys
+kube.update_metadata({SPLIT: "train", TOKENIZER_NAME: "gpt2"})
+```
+
+### 16. Check which optional backends are available
+
+```python
+from kube.integrations import available_backends
+print(available_backends())
+# e.g. ['arrow', 'numpy', 'pandas', 'torch']
+```
+
 ## Recommended Table Shapes
 
 `to_polars(...)` returns a table with:
@@ -244,6 +373,16 @@ On `Kube`:
 - `iter_region(...)`
 - `update_metadata(...)`
 - `flush()`
+- `schema(mode)` — column layout dict for a given schema mode
+- `to_arrow(bounds, schema_mode)` — PyArrow Table
+- `from_arrow(table, shape, states)` — classmethod
+- `to_numpy(bounds, packed)` — NumPy array
+- `faces_to_numpy()` — `(W, H, D, 6)` spatial array
+- `region_to_numpy(bounds)` — `(N, 6)` bounded array
+- `to_pandas(bounds)` — Pandas DataFrame
+- `from_pandas(df, shape, states)` — classmethod
+- `to_parquet(path, bounds, schema_mode)` — Parquet file
+- `to_sklearn_xy(target_face, bounds)` — `(X, y)` arrays
 
 On `ShardedKubeDataset`:
 
@@ -258,6 +397,11 @@ On `ShardedKubeDataset`:
 - `load_resume_state(...)`
 - `sample_sequences_frame(...)`
 - `export_stats_parquet(...)`
+- `to_arrow(sequence_length, count)` — PyArrow Table of sequence windows
+- `to_parquet(path, sequence_length, count)` — Parquet file
+- `to_hf_dataset(sequence_length, count)` — HuggingFace in-memory Dataset
+- `to_hf_iterable_dataset(sequence_length)` — streaming IterableDataset
+- `iter_lm_batches(batch_size, sequence_length)` — padded LM batches
 
 ## Limitations
 
