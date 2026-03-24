@@ -170,8 +170,8 @@ That means you will typically need:
 If you already have an unpacked Windows raylib bundle with `include/` and `lib/`
 folders, point the build at it explicitly before installing:
 
-```powershell
-$env:KUBE_RAYLIB_ROOT="C:\Users\0rams\Documents\Repos\raylib-5.5_win64_mingw-w64"
+```bash
+KUBE_RAYLIB_ROOT="/path/to/raylib"
 poetry install
 ```
 
