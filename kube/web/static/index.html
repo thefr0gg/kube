@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kube Viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0a0a; color: #e8e8e8; font-family: ui-monospace, Consolas, monospace; overflow: hidden; }
+  #canvas-holder { position: absolute; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #panel {
+    position: absolute; top: 12px; right: 12px; width: 260px;
+    background: rgba(12,12,12,0.88); border: 1px solid #333; border-radius: 6px;
+    padding: 12px; font-size: 13px; line-height: 1.5;
+  }
+  #panel h1 { font-size: 13px; margin: 0 0 8px; color: #9a9; letter-spacing: 0.04em; text-transform: uppercase; }
+  #panel label { display: block; margin-top: 8px; color: #999; font-size: 11px; text-transform: uppercase; }
+  #panel select, #panel input { width: 100%; box-sizing: border-box; background: #151515; color: #eee; border: 1px solid #333; border-radius: 4px; padding: 4px 6px; margin-top: 2px; }
+  #panel .row { display: flex; gap: 6px; }
+  #panel .row > * { flex: 1; }
+  #selection { margin-top: 10px; padding-top: 10px; border-top: 1px solid #333; }
+  #selection .k { color: #888; }
+  button { background: #1c1c1c; color: #eee; border: 1px solid #3a3a3a; border-radius: 4px; padding: 5px 8px; cursor: pointer; margin-top: 8px; width: 100%; }
+  button:hover { background: #262626; }
+  #status { position: absolute; bottom: 10px; left: 12px; font-size: 12px; color: #888; }
+</style>
+</head>
+<body>
+<div id="canvas-holder"></div>
+<div id="panel">
+  <h1 id="title">kube</h1>
+  <label>View mode
+    <select id="view-mode">
+      <option value="shell">shell</option>
+      <option value="slice">slice</option>
+    </select>
+  </label>
+  <div class="row">
+    <label>Axis
+      <select id="slice-axis">
+        <option value="0">x</option>
+        <option value="1">y</option>
+        <option value="2">z</option>
+      </select>
+    </label>
+    <label>Index
+      <input id="slice-index" type="number" value="0" min="0" />
+    </label>
+  </div>
+  <label>LOD
+    <input id="lod" type="number" value="1" min="1" />
+  </label>
+  <div id="selection">
+    <div class="k">no selection</div>
+  </div>
+</div>
+<div id="status">loading…</div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="viewer.js"></script>
+</body>
+</html>

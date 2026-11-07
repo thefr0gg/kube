@@ -63,31 +63,66 @@ def _stringify_field(value: Any) -> str:
     return str(value).replace("\n", "\\n")
 
 
-class KubeFormatter(logging.Formatter):
-    """Format log records into a compact Kube-oriented terminal line.
+_ANSI_RESET = "\x1b[0m"
+_LEVEL_COLOR = {
+    logging.WARNING: "\x1b[33m",  # yellow
+    logging.ERROR: "\x1b[31m",  # red
+    logging.CRITICAL: "\x1b[31m",  # red
+}
 
-    The formatter exists because generic logging output tends to hide the small
-    structured facts that matter in Kube workflows, such as path, shape, shard,
-    and sequence metadata.
+
+def _color_enabled(stream) -> bool:
+    """Decide whether ANSI colors should be written to `stream`.
+
+    Exists so colored output only reaches real terminals: piped/redirected
+    output and log files stay plain text, and `NO_COLOR` is honored per the
+    https://no-color.org convention.
+    """
+    if os.getenv("NO_COLOR"):
+        return False
+    isatty = getattr(stream, "isatty", None)
+    return bool(isatty and isatty())
+
+
+class KubeFormatter(logging.Formatter):
+    """Format log records into a terse, terminal-native Kube line.
+
+    The formatter exists to keep Kube's CLI output reading like a small tool's
+    console chatter rather than a structured/API access log — a short tag, a
+    plain message, and bare values trailing after it with no `key=` noise.
+    Warnings and errors are colored (yellow/red) when writing to a real
+    terminal, so they stand out without needing extra words.
     """
 
-    default_msec_format = "%s.%03d"
+    def __init__(self, *, color: bool = False) -> None:
+        super().__init__()
+        self._color = color
 
     def format(self, record: logging.LogRecord) -> str:
-        """Render one record using Kube's timestamp, scope, and field layout."""
-        timestamp = self.formatTime(record, "%H:%M:%S")
+        """Render one record as `[scope] message  values...`."""
         scope = record.name
         if scope.startswith("kube."):
             scope = scope[5:]
+        prefix = f"[{scope}]"
         fields = getattr(record, "kube_fields", None) or {}
-        field_text = ""
-        if fields:
-            field_text = " | " + " ".join(
-                f"{key}={_stringify_field(value)}"
-                for key, value in fields.items()
-                if value is not None
-            )
-        return f"{timestamp} | {record.levelname:<7} | {scope:<20} | {record.getMessage()}{field_text}"
+        parts = []
+        for key, value in fields.items():
+            if value is None:
+                continue
+            text = _stringify_field(value)
+            # Self-evident values (paths, shapes, dtypes) read fine bare; short
+            # scalars (counts, flags, modes) need their key or they're noise.
+            if len(text) <= 6 and not ("x" in text and text[0].isdigit()):
+                parts.append(f"{key}={text}")
+            else:
+                parts.append(text)
+        field_text = "  " + "  ".join(parts) if parts else ""
+        line = f"{prefix} {record.getMessage()}{field_text}"
+
+        color = self._color and _LEVEL_COLOR.get(record.levelno)
+        if color:
+            line = f"{color}{line}{_ANSI_RESET}"
+        return line
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
@@ -121,9 +156,10 @@ def configure_logging(
         root.removeHandler(handler)
         handler.close()
 
-    console = logging.StreamHandler(stream or sys.stderr)
+    console_stream = stream or sys.stderr
+    console = logging.StreamHandler(console_stream)
     console.setLevel(resolved_level)
-    console.setFormatter(KubeFormatter())
+    console.setFormatter(KubeFormatter(color=_color_enabled(console_stream)))
     root.addHandler(console)
 
     if log_file is not None:
@@ -131,7 +167,7 @@ def configure_logging(
         log_file.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(resolved_level)
-        file_handler.setFormatter(KubeFormatter())
+        file_handler.setFormatter(KubeFormatter(color=False))
         root.addHandler(file_handler)
 
     return root

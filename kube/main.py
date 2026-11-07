@@ -5,7 +5,7 @@ The CLI covers three major workflow families:
 
 - `.kube` storage creation, import/export, inspection, and stats
 - `.kubed` dataset creation, ingest, sampling, and reporting
-- the native viewer/editor for interactive inspection
+- the localhost web viewer/editor for interactive inspection
 
 The implementation is intentionally split into small handler functions so the
 argparse definitions can stay descriptive while the command execution paths stay
@@ -39,7 +39,7 @@ TOP_LEVEL_EPILOG = """Examples:
   kube import README.md data/readme.kube --states 4
   kube inspect data/readme.kube
   kube stats data/readme.kube --slice z=0 --normalize
-  kube view data/readme.kube --lod 2 --window-size 1600x1000
+  kube view data/readme.kube --lod 2 --port 8765
   kube dataset-create corpora/wiki.kubed --shards 8 --sequence-length 1024
   kube dataset-sample corpora/wiki.kubed --sequence-length 256 --count 2
 """
@@ -73,11 +73,6 @@ def _slice_label(slice_spec: tuple[int, int] | None) -> str | None:
     return f"{axis_name}={slice_spec[1]}"
 
 
-def _window_size_label(size: tuple[int, int]) -> str:
-    """Render a window size tuple using the CLI's `WIDTHxHEIGHT` syntax."""
-    return f"{size[0]}x{size[1]}"
-
-
 def _emit_json(payload: Any) -> None:
     """Write one pretty JSON payload to stdout."""
     print(json.dumps(payload, indent=2))
@@ -89,6 +84,38 @@ def _emit_optional_json(args, payload: dict[str, Any], *, text_lines: list[str])
         _emit_json(payload)
         return
     print("\n".join(text_lines))
+
+
+def _format_table(rows: list[tuple[str, str]]) -> str:
+    """Render `(key, value)` pairs as a two-column, left-aligned text table.
+
+    Exists so CLI commands can print scannable key/value summaries instead of
+    raw JSON when a human is reading the terminal directly.
+    """
+    if not rows:
+        return ""
+    key_width = max(len(key) for key, _ in rows)
+    lines = [f"{key.ljust(key_width)}  {value}" for key, value in rows]
+    return "\n".join(lines)
+
+
+def _format_grid(headers: list[str], rows: list[list[str]]) -> str:
+    """Render a header row plus data rows as a left-aligned, column-sized text table.
+
+    Exists for CLI commands whose result is naturally many short records (like
+    a per-face histogram) rather than one key/value summary.
+    """
+    if not rows:
+        return "(no rows)"
+    widths = [len(header) for header in headers]
+    for row in rows:
+        for index, cell in enumerate(row):
+            widths[index] = max(widths[index], len(cell))
+    def _line(cells: list[str]) -> str:
+        return "  ".join(cell.ljust(widths[index]) for index, cell in enumerate(cells)).rstrip()
+    lines = [_line(headers), _line(["-" * width for width in widths])]
+    lines.extend(_line(row) for row in rows)
+    return "\n".join(lines)
 
 
 def _parser(
@@ -139,21 +166,6 @@ def _parse_slice(text: str) -> tuple[int, int]:
         return axis_map[axis_name], int(raw_index)
     except ValueError as exc:
         raise argparse.ArgumentTypeError("slice index must be an integer") from exc
-
-
-def _parse_window_size(text: str) -> tuple[int, int]:
-    """Parse `WIDTHxHEIGHT` viewer sizes from the CLI."""
-    width_text, _, height_text = text.lower().partition("x")
-    if not width_text or not height_text:
-        raise argparse.ArgumentTypeError("window size must be WIDTHxHEIGHT")
-    try:
-        width = int(width_text)
-        height = int(height_text)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("window size must be WIDTHxHEIGHT") from exc
-    if width < 320 or height < 240:
-        raise argparse.ArgumentTypeError("window size is too small")
-    return (width, height)
 
 
 def _add_common_cli_options(parser: argparse.ArgumentParser) -> None:
@@ -402,7 +414,7 @@ def _parse_bounds(text: str):
 
 
 def _handle_inspect(args) -> None:
-    """Print kube metadata and storage stats as JSON."""
+    """Print kube metadata and storage stats as a table (or JSON with --output json)."""
     log_event(args.logger, logging.INFO, "inspecting kube", path=args.path)
     with open_kube(args.path, mode="r") as kube:
         payload = kube.inspect()
@@ -415,7 +427,33 @@ def _handle_inspect(args) -> None:
         dtype=payload["dtype"],
         storage=payload["storage"],
     )
-    _emit_json(payload)
+    if args.output == "json":
+        _emit_json(payload)
+        return
+
+    metadata = payload.get("metadata") or {}
+    rows = [
+        ("path", str(args.path)),
+        ("storage", payload["storage"]),
+        ("acceleration", payload["acceleration"]),
+        ("grid_shape", _shape_label(payload["grid_shape"])),
+        ("states_per_face", str(payload["states_per_face"])),
+        ("bits_per_face", str(payload["bits_per_face"])),
+        ("dtype", payload["dtype"]),
+        ("packed_bytes", str(payload["packed_bytes"])),
+        ("unpacked_bytes", str(payload["unpacked_bytes"])),
+        ("ratio", f"{payload['ratio']:.3f}"),
+        ("capacity_bytes", str(payload["capacity_bytes"])),
+        ("source_byte_count", str(payload["source_byte_count"])),
+    ]
+    print(_format_table(rows))
+    if metadata:
+        print()
+        print("metadata:")
+        print(_format_table([(str(key), str(value)) for key, value in metadata.items()]))
+
+
+_FACE_NAMES = ("top", "bottom", "left", "right", "front", "back")
 
 
 def _handle_stats(args) -> None:
@@ -448,11 +486,30 @@ def _handle_stats(args) -> None:
         rows=len(payload["rows"]),
         slice=_slice_label(args.slice_spec),
     )
-    _emit_json(payload)
+    if args.output == "json":
+        _emit_json(payload)
+        return
+
+    print(f"Shape: {_shape_label(payload['shape'])}  States: {payload['states']}", end="")
+    if payload["bounds"] is not None:
+        print(f"  Slice: {_slice_label(args.slice_spec)}")
+    else:
+        print()
+    print()
+
+    has_probability = payload["normalize"]
+    headers = ["face", "value", "count"] + (["probability"] if has_probability else [])
+    grid_rows = []
+    for row in payload["rows"]:
+        cells = [_FACE_NAMES[row["face"]], str(row["value"]), str(row["count"])]
+        if has_probability:
+            cells.append(f"{row['probability']:.4f}")
+        grid_rows.append(cells)
+    print(_format_grid(headers, grid_rows))
 
 
 def _handle_view(args) -> None:
-    """Open the native viewer/editor for a kube file."""
+    """Open the web viewer/editor for a kube file."""
     log_event(
         args.logger,
         logging.INFO,
@@ -461,7 +518,7 @@ def _handle_view(args) -> None:
         slice=_slice_label(args.slice_spec),
         lod=args.lod,
         read_only=args.read_only,
-        window_size=_window_size_label(args.window_size),
+        port=args.port,
     )
     with open_kube(args.path, mode="r" if args.read_only else "r+") as kube:
         slice_axis = None
@@ -473,7 +530,7 @@ def _handle_view(args) -> None:
             slice_axis=slice_axis,
             slice_index=slice_index,
             lod=args.lod,
-            window_size=args.window_size,
+            port=args.port,
         )
     log_event(args.logger, logging.INFO, "viewer session finished", path=args.path)
 
@@ -707,7 +764,7 @@ def _handle_demo(args) -> None:
         shape=args.shape,
         states=args.states,
         lod=args.lod,
-        window_size=_window_size_label(args.window_size),
+        port=args.port,
     )
     kube = Kube(*args.shape, states=args.states)
     try:
@@ -723,7 +780,7 @@ def _handle_demo(args) -> None:
                 f"Demo shape: {_shape_label(kube.shape)}  States: {kube.S}  Capacity: {kube.capacity_bytes()} bytes",
             ],
         )
-        kube.view(lod=args.lod, window_size=args.window_size)
+        kube.view(lod=args.lod, port=args.port)
     finally:
         kube.close()
     log_event(args.logger, logging.INFO, "demo viewer session finished", shape=args.shape)
@@ -734,7 +791,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kube",
         description=(
-            "Kube CLI for packed cube storage, dataset preparation, and the native viewer.\n\n"
+            "Kube CLI for packed cube storage, dataset preparation, and the web viewer.\n\n"
             "Kube keeps byte-oriented data in `.kube` containers and token-oriented corpora in\n"
             "sharded `.kubed` dataset roots."
         ),
@@ -946,13 +1003,13 @@ def build_parser() -> argparse.ArgumentParser:
         subparsers,
         "view",
         help_text="view a kube file",
-        description="Open the native Kube viewer/editor for one `.kube` file.",
-        epilog="Example:\n  kube view data/demo.kube --slice z=4 --lod 2 --window-size 1600x1000",
+        description="Open the localhost web viewer/editor for one `.kube` file.",
+        epilog="Example:\n  kube view data/demo.kube --slice z=4 --lod 2 --port 8765",
     )
     view_parser.add_argument("path", type=Path, help="target `.kube` file")
     view_parser.add_argument("--slice", dest="slice_spec", type=_parse_slice, metavar="x=N|y=N|z=N", help="start in slice mode at the given slice")
     view_parser.add_argument("--lod", default=1, type=int, help="viewer sampling stride")
-    view_parser.add_argument("--window-size", default=(1440, 900), type=_parse_window_size, metavar="WIDTHxHEIGHT", help="initial viewer window size")
+    view_parser.add_argument("--port", default=0, type=int, help="localhost port to serve on (0 = pick automatically)")
     view_parser.add_argument("--read-only", action="store_true", help="disable edit/autosave operations")
     view_parser.set_defaults(func=_handle_view)
 
@@ -966,7 +1023,7 @@ def build_parser() -> argparse.ArgumentParser:
     demo_parser.add_argument("--shape", default=(8, 8, 8), type=_parse_shape, metavar="N|WxHxD", help="demo cube dimensions")
     demo_parser.add_argument("--states", default=4, type=int, help="number of allowed values per face")
     demo_parser.add_argument("--lod", default=1, type=int, help="viewer sampling stride")
-    demo_parser.add_argument("--window-size", default=(1440, 900), type=_parse_window_size, metavar="WIDTHxHEIGHT", help="initial viewer window size")
+    demo_parser.add_argument("--port", default=0, type=int, help="localhost port to serve on (0 = pick automatically)")
     demo_parser.set_defaults(func=_handle_demo)
 
     from kube.benchmark._cli import add_benchmark_parser, handle_benchmark

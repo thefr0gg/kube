@@ -46,6 +46,9 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 
+# Local raylib bundle (KUBE_RAYLIB_ROOT dev convenience)
+raylib-5.5_win64_mingw-w64/
+
 # Native libraries produced into the package directory
 kube/*.dll
 kube/*.so

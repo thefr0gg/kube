@@ -6,7 +6,7 @@ of these layers:
 - the `.kube` storage/runtime model in Python
 - the `.kubed` dataset path
 - the CLI and logging surface
-- the native editor and renderer
+- the web viewer/editor (FastAPI backend + WebGL frontend)
 - docs and examples
 
 This guide exists to make that workflow predictable so contributors can ship
@@ -19,7 +19,7 @@ Kube is not only a viewer. The project identity spans:
 - face-addressable storage
 - memory-mapped data access
 - DataFrame and dataset workflows
-- native interactive debugging
+- interactive debugging via the web viewer
 
 That means changes should preserve consistency across those surfaces when
 possible. If you update the storage model, also think about:
@@ -27,7 +27,7 @@ possible. If you update the storage model, also think about:
 - CLI behavior
 - examples
 - docs
-- native/editor assumptions
+- web viewer assumptions
 
 ## Development Setup
 
@@ -49,33 +49,23 @@ poetry install -E examples
 
 ### 2. Native prerequisites
 
-The editor and native acceleration libraries are built with CMake.
+The storage acceleration library is built with CMake.
 
 You will typically need:
 
 - `cmake >= 3.20`
 - a working C toolchain
-- `raylib` available either through CMake, through fetch, or through
-  `KUBE_RAYLIB_ROOT`
 
-Windows example:
+That project install path attempts to build the native library automatically
+through the Poetry build hook.
 
-```powershell
-$env:KUBE_RAYLIB_ROOT="/path/to/raylib"
-poetry install
-```
+## Building The Native Library
 
-That project install path now attempts to build the native libraries
-automatically through the Poetry build hook.
+Kube builds one native shared library:
 
-## Building Native Libraries
-
-Kube currently builds two native shared libraries:
-
-- `kube_renderer`: the editor/viewer bridge
 - `kube_storage`: storage hot paths for random IO
 
-The default target is `kube_native`, which builds both.
+The default target is `kube_native`, which builds it.
 
 Examples:
 
@@ -95,8 +85,6 @@ Useful flags:
 
 - `--clean`
 - `--build-dir <path>`
-- `--use-system-raylib` / `--no-use-system-raylib`
-- `--raylib-root <path>`
 
 ## Testing
 
@@ -109,11 +97,11 @@ poetry run python -m unittest tests.test_kube -q
 Useful validation commands:
 
 ```bash
-poetry run python -m py_compile kube\model.py kube\main.py kube\renderer.py
+poetry run python -m py_compile kube\model.py kube\main.py kube\web\server.py
 poetry run python examples\benchmark_kube_vs_binary.py --shape 8x8x8 --states 4 --ops 1000 --repeats 1
 ```
 
-For native changes, also verify the shared libraries still build:
+For native changes, also verify the shared library still builds:
 
 ```bash
 python build.py
@@ -128,7 +116,7 @@ Kube has multiple user-facing entry points:
 - Python API
 - CLI
 - `.kube` file format
-- native viewer/editor
+- web viewer/editor
 
 Unless the change is intentionally breaking, keep those interfaces stable.
 
@@ -148,7 +136,7 @@ That is especially important for native acceleration work.
 When a contribution changes behavior, update the relevant docs in the same PR:
 
 - [README.md](https://github.com/ramsy0dev/kube/blob/main/README.md)
-- [WIKI.md](https://github.com/ramsy0dev/kube/blob/main/WIKI.md)
+- [docs/reference.md](https://github.com/ramsy0dev/kube/blob/main/docs/reference.md)
 - examples in `examples/`
 
 If a feature adds a new workflow, include at least one concrete example.
@@ -164,9 +152,17 @@ If a feature adds a new workflow, include at least one concrete example.
 
 ### Native code
 
-- keep renderer concerns separate from storage acceleration concerns
-- avoid introducing UI dependencies into non-UI native libraries
+- the native library is storage-only (`kube_storage`); keep it free of
+  UI/rendering dependencies
 - preserve Windows build compatibility, especially MinGW-based setups
+
+### Web viewer
+
+- keep mesh-building logic in `kube/web/mesh.py` vectorized (numpy), not
+  per-cell Python loops
+- the server in `kube/web/server.py` is localhost-only by design — do not add
+  auth scaffolding or externally-facing defaults
+- the frontend in `kube/web/static/` has no build step; keep it that way
 
 ### Docs
 

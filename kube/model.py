@@ -1669,26 +1669,30 @@ class Kube:
         slice_axis: int | None = None,
         slice_index: int | None = None,
         lod: int = 1,
-        window_size=(1024, 768),
+        host: str = "127.0.0.1",
+        port: int = 0,
+        open_browser: bool = True,
     ) -> None:
-        """Launch the native viewer/editor for this kube.
+        """Launch the localhost web viewer/editor for this kube.
 
-        The method exists so inspection and editing stay a first-class part of
-        the storage object rather than requiring callers to instantiate the
-        renderer bridge manually.
+        Starts a FastAPI/uvicorn server serving the WebGL viewer and blocks
+        until the browser tab is closed (via `/api/shutdown`) or the process
+        receives Ctrl+C. The method exists so inspection and editing stay a
+        first-class part of the storage object rather than requiring callers
+        to wire up the web server manually.
         """
-        from kube.renderer import Renderer
+        from kube.web.serve import serve
 
-        if len(window_size) != 2:
-            raise ValueError("window_size must be a (width, height) pair")
-        Renderer(
+        serve(
             self,
-            window_size=window_size,
             read_only=read_only,
             slice_axis=slice_axis,
             slice_index=slice_index,
             lod=lod,
-        ).run()
+            host=host,
+            port=port,
+            open_browser=open_browser,
+        )
 
     # ------------------------------------------------------------------
     # Interop: Arrow / Parquet / NumPy / Pandas / sklearn

@@ -36,7 +36,6 @@ from kube.dataset import (
 )
 from kube.logs import configure_logging, get_logger, log_event
 from kube.model import Cell, Kube
-from kube.renderer import Renderer
 
 
 def create(path, shape, states: int = 4, *, overwrite: bool = False) -> Kube:
@@ -118,7 +117,6 @@ __all__ = [
     "Cell",
     "Kube",
     "ShardedKubeDataset",
-    "Renderer",
     # Convenience constructors
     "create",
     "create_sharded",

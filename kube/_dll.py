@@ -1,9 +1,8 @@
-"""Native library loading helpers for the renderer bridge.
+"""Native storage library loading helpers.
 
 This module exists to keep `ctypes` setup isolated from the higher-level
-renderer code. It resolves the platform-specific shared library name, loads the
-editor DLL/shared object, and defines the callback signatures that the C
-renderer expects when it calls back into Python.
+storage model code. It resolves the platform-specific shared library name and
+loads the `kube_storage` accelerator used by the packed-cell runtime.
 """
 
 import ctypes
@@ -11,48 +10,7 @@ import os
 import sys
 from pathlib import Path
 
-_dll_cache = None
 _storage_dll_cache = False
-
-SET_FACE_CB = ctypes.CFUNCTYPE(
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-)
-FLUSH_CB = ctypes.CFUNCTYPE(ctypes.c_int)
-RUN_CODE_CB = ctypes.CFUNCTYPE(
-    ctypes.c_int,
-    ctypes.c_char_p,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.POINTER(ctypes.c_char),
-    ctypes.c_int,
-)
-
-
-def _renderer_lib_names() -> tuple[str, ...]:
-    """Return the platform-specific native renderer filename candidates.
-
-    Different build tools may or may not prefix shared libraries with `lib` on
-    Windows. This helper exists so the Python bridge can accept the names that
-    CMake actually emits in local builds and packaged installs.
-    """
-    if sys.platform == "win32":
-        return ("kube_renderer.dll", "libkube_renderer.dll")
-    if sys.platform == "darwin":
-        return ("libkube_renderer.dylib",)
-    return ("libkube_renderer.so",)
 
 
 def _storage_lib_names() -> tuple[str, ...]:
@@ -79,63 +37,12 @@ def _prepare_windows_dll_directory(path: Path) -> None:
         os.add_dll_directory(str(path.parent))
 
 
-def load_dll() -> ctypes.CDLL:
-    """Load and cache the native renderer library.
-
-    This function exists so the rest of the codebase can ask for the renderer
-    once and rely on a configured `ctypes.CDLL` object with the correct
-    argument types and return type for `kube_run(...)`.
-    """
-    global _dll_cache
-    if _dll_cache is not None:
-        return _dll_cache
-
-    path = _find_library_path(_renderer_lib_names())
-    if path is None:
-        raise FileNotFoundError(
-            f"{_renderer_lib_names()[0]} not found in {Path(__file__).parent}\n"
-            "Build it first:\n"
-            "  python build.py\n"
-            "\n"
-            "Windows (MinGW64):  python build.py --generator \"MinGW Makefiles\"\n"
-            "Linux:              python3 build.py"
-        )
-
-    _prepare_windows_dll_directory(path)
-
-    lib = ctypes.CDLL(str(path))
-    fn = lib.kube_run
-    fn.restype = None
-    fn.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_char_p,
-        SET_FACE_CB,
-        FLUSH_CB,
-        RUN_CODE_CB,
-    ]
-    _dll_cache = lib
-    return lib
-
-
 def load_storage_dll(*, optional: bool = False) -> ctypes.CDLL | None:
     """Load and cache the native storage accelerator.
 
-    Kube's storage runtime now requires the storage library so the packed-cell
-    engine always uses the native hot path instead of silently falling back to
-    the slower Python implementation.
+    Kube's storage runtime always uses the native storage library so the
+    packed-cell engine always uses the native hot path instead of silently
+    falling back to a slower Python implementation.
     """
     global _storage_dll_cache
     if _storage_dll_cache is not False:

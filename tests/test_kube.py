@@ -1,10 +1,8 @@
-import argparse
 import tempfile
 import unittest
 from pathlib import Path
 
 from kube import Cell, Kube, from_polars
-from kube.main import _parse_window_size
 
 
 class KubeTests(unittest.TestCase):
@@ -201,20 +199,10 @@ class KubeTests(unittest.TestCase):
         self.assertTrue(all("target" in batch.columns for batch in batches))
         self.assertTrue(all("face_2" not in batch.columns for batch in batches))
 
-    def test_view_rejects_invalid_window_size(self):
-        kube = Kube(2, 2, 2, states=4)
-        with self.assertRaises(ValueError):
-            kube.view(window_size=(1024,))
-
     def test_labels_reflect_storage_mode(self):
         kube = Kube(2, 2, 2, states=4)
         self.assertEqual(kube.storage_label, "memory")
         self.assertEqual(kube.file_label, "in-memory kube")
-
-    def test_parse_window_size(self):
-        self.assertEqual(_parse_window_size("1440x900"), (1440, 900))
-        with self.assertRaises(argparse.ArgumentTypeError):
-            _parse_window_size("bad-size")
 
 
 if __name__ == "__main__":

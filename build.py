@@ -28,11 +28,6 @@ MULTI_CONFIG_GENERATORS = {
 }
 
 
-def _bool_flag(value: bool) -> str:
-    """Convert a Python boolean into the CMake `ON`/`OFF` convention."""
-    return "ON" if value else "OFF"
-
-
 def _run(command: list[str], *, cwd: Path, log_file: Path | None = None) -> None:
     """Run one subprocess and optionally tee output into a build log.
 
@@ -189,7 +184,7 @@ def _reset_incompatible_cache(args: argparse.Namespace) -> None:
 def _reset_incompatible_nested_caches(args: argparse.Namespace) -> None:
     """Delete nested CMake sub-builds that were configured with another generator.
 
-    FetchContent dependencies such as raylib can create their own CMake cache
+    CMake `FetchContent` dependencies can create their own CMake cache
     directories under the main build tree. When the top-level build switches
     from `MinGW Makefiles` to `Ninja` (or the reverse), those nested caches can
     still fail configure even after the main cache is valid. This helper exists
@@ -226,7 +221,6 @@ def _configure_command(args: argparse.Namespace, cmake: str) -> list[str]:
         str(ROOT),
         "-B",
         str(args.build_dir),
-        f"-DKUBE_USE_SYSTEM_RAYLIB={_bool_flag(args.use_system_raylib)}",
     ]
     if args.generator:
         command.extend(["-G", args.generator])
@@ -234,8 +228,6 @@ def _configure_command(args: argparse.Namespace, cmake: str) -> list[str]:
         command.append(f"-DCMAKE_BUILD_TYPE={args.config}")
     if args.verbose:
         command.append("--log-level=VERBOSE")
-    if getattr(args, "raylib_root", None):
-        command.append(f"-DKUBE_RAYLIB_ROOT={args.raylib_root}")
     command.extend(args.cmake_arg)
     return command
 
@@ -275,17 +267,6 @@ def parse_args() -> argparse.Namespace:
         help="Write full configure/build logs to this file while still streaming them to the console",
     )
     parser.add_argument(
-        "--use-system-raylib",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Prefer an installed raylib package before FetchContent downloads it",
-    )
-    parser.add_argument(
-        "--raylib-root",
-        type=Path,
-        help="path to an unpacked raylib folder containing include/ and lib/",
-    )
-    parser.add_argument(
         "--cmake-arg",
         action="append",
         default=[],
@@ -308,20 +289,19 @@ def build() -> None:
     `pyproject.toml`.
 
     The hook intentionally uses conservative defaults so that a normal package
-    install will attempt to build the editor without requiring CLI arguments.
-    A few environment variables are supported for CI or local overrides:
+    install will attempt to build the storage accelerator without requiring
+    CLI arguments. A few environment variables are supported for CI or local
+    overrides:
 
     - `KUBE_BUILD_GENERATOR`
     - `KUBE_BUILD_DIR`
     - `KUBE_BUILD_CONFIG`
     - `KUBE_BUILD_TARGET`
     - `KUBE_BUILD_PARALLEL`
-     - `KUBE_BUILD_VERBOSE`
-     - `KUBE_USE_SYSTEM_RAYLIB`
-     - `KUBE_RAYLIB_ROOT`
-     - `KUBE_BUILD_CMAKE_ONLY`
-     - `KUBE_BUILD_RECONFIGURE`
-     """
+    - `KUBE_BUILD_VERBOSE`
+    - `KUBE_BUILD_CMAKE_ONLY`
+    - `KUBE_BUILD_RECONFIGURE`
+    """
     generator = os.getenv("KUBE_BUILD_GENERATOR")
     build_dir_value = os.getenv("KUBE_BUILD_DIR")
     config = os.getenv("KUBE_BUILD_CONFIG", "Release")
@@ -330,9 +310,6 @@ def build() -> None:
     verbose = os.getenv("KUBE_BUILD_VERBOSE", "").strip().lower() in {"1", "true", "yes", "on"}
     cmake_only = os.getenv("KUBE_BUILD_CMAKE_ONLY", "").strip().lower() in {"1", "true", "yes", "on"}
     reconfigure = os.getenv("KUBE_BUILD_RECONFIGURE", "").strip().lower() in {"1", "true", "yes", "on"}
-    use_system_raylib_raw = os.getenv("KUBE_USE_SYSTEM_RAYLIB", "1").strip().lower()
-    use_system_raylib = use_system_raylib_raw not in {"0", "false", "no", "off"}
-    raylib_root_value = os.getenv("KUBE_RAYLIB_ROOT")
 
     args = argparse.Namespace(
         generator=generator,
@@ -345,8 +322,6 @@ def build() -> None:
         reconfigure=reconfigure,
         verbose=verbose,
         log_file=None,
-        use_system_raylib=use_system_raylib,
-        raylib_root=Path(raylib_root_value).resolve() if raylib_root_value else None,
         cmake_arg=[],
         build_arg=[],
     )
@@ -367,13 +342,7 @@ def main() -> None:
     """Run the direct-command build flow used by developers and CI."""
     args = parse_args()
     cmake = _cmake_executable()
-    if args.raylib_root is None:
-        raylib_root_value = os.getenv("KUBE_RAYLIB_ROOT")
-        if raylib_root_value:
-            args.raylib_root = Path(raylib_root_value)
     args.build_dir = args.build_dir.resolve()
-    if args.raylib_root is not None:
-        args.raylib_root = args.raylib_root.resolve()
     if args.log_file is not None:
         args.log_file = args.log_file.resolve()
 
