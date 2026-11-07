@@ -7,6 +7,50 @@ Version numbers follow [PEP 440](https://peps.python.org/pep-0440/) (e.g. `0.0.1
 
 ---
 
+## [0.1.0] – 2026-11-07
+
+First release outside of beta.
+
+### Web viewer
+
+- Replaced the native raylib + Clay renderer with a FastAPI backend and a
+  WebGL (three.js) frontend (`kube view`) — no native renderer dependency,
+  no build step for the frontend
+- `kube/web/server.py`: `/api/state`, `/api/view`, `/api/mesh`, `/api/cell`,
+  `/ws/edit` WebSocket
+- `kube/web/mesh.py`: vectorized numpy shell/slice mesh builder
+- `kube/web/serve.py`: port selection, uvicorn startup, browser launch
+
+### Performance
+
+- `to_polars` (and everything that routes through it — `feature_frame`,
+  `faces_to_numpy`, `to_pandas`, `to_arrow`, `to_parquet`, `to_sklearn_xy`)
+  now unpacks faces via vectorized numpy instead of a per-cell Python loop
+- `flush()` skips the on-disk header rewrite when metadata hasn't changed,
+  cutting the viewer's per-edit round trip from ~130 to ~15k edits/s
+- `read_token_ids` decodes via `np.frombuffer` instead of a per-token
+  `int.from_bytes` loop
+- native batch loops (`set_packed_batch`, `get_faces_batch`,
+  `set_faces_batch`) branch on itemsize once per call instead of once per
+  element
+
+### Benchmark suite
+
+- Rewritten around four realistic usage scenarios — `stream_import`,
+  `table_conversion`, `lm_dataset`, `viewer_ops` — in place of raw
+  micro-ops and the old binary-occupancy comparison
+
+### CI
+
+- Cross-platform test matrix (Linux, Windows, macOS) across Python 3.11/3.12
+- Dedicated full-extras job (arrow, hf, torch, examples)
+- Removed stale raylib system dependencies
+
+### Other
+
+- `examples/benchmark_kube_vs_binary.py` removed
+- Full rewrite of `docs/guide/` and `docs/reference.md`
+
 ## [0.0.1b1] – 2026-03-24
 
 Initial public beta. Everything is new.
@@ -81,4 +125,5 @@ Initial public beta. Everything is new.
 
 ---
 
+[0.1.0]: https://github.com/thefr0gg/kube/releases/tag/v0.1.0
 [0.0.1b1]: https://github.com/thefr0gg/kube/releases/tag/v0.0.1b1

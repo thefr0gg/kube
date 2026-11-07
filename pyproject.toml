@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "kube"
-version = "0.0.1b1"
+version = "0.1.0"
 description = "Spatial-native data system for face-addressable, memory-mapped datasets"
 authors = []
 license = "MIT"
 readme = "README.md"
 packages = [{ include = "kube" }]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",

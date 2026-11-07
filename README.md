@@ -210,7 +210,7 @@ kube benchmark --scenarios stream_import,lm_dataset
 Results at `--size 64`, 5 iterations (Windows, MinGW64, w64devkit gcc, pyarrow/pandas installed):
 
 ```
-kube benchmark  v0.0.1b1
+kube benchmark  v0.1.0
 size=64  states=4  5 iters
 ------------------------------------------------------------------------------
 Scenario           Backend                                Throughput    Best ms    Mean ms
