@@ -98,7 +98,7 @@ Useful validation commands:
 
 ```bash
 poetry run python -m py_compile kube\model.py kube\main.py kube\web\server.py
-poetry run python examples\benchmark_kube_vs_binary.py --shape 8x8x8 --states 4 --ops 1000 --repeats 1
+poetry run kube benchmark --size 16 --iterations 1
 ```
 
 For native changes, also verify the shared library still builds:

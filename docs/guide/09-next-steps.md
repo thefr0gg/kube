@@ -13,10 +13,9 @@ Pandas, PyTorch, scikit-learn, or HuggingFace project. From here:
   [Chapter 8](08-integrating.md), plus a quick-reference API summary table.
   Good as a cheat sheet once the concepts in this guide are familiar.
 
-- **[examples/](../../examples/)** — full, runnable scripts: a benchmark
-  against plain binary occupancy, dataset QA report export, text-corpus
-  ingestion, tiled region processing, the binary round-trip pattern, and a
-  complete tiny LM training loop.
+- **[examples/](../../examples/)** — full, runnable scripts: dataset QA
+  report export, text-corpus ingestion, tiled region processing, the binary
+  round-trip pattern, and a complete tiny LM training loop.
 
 - **[README.md](../../README.md)** — the project pitch and install
   instructions, plus a benchmark-results table if you want performance

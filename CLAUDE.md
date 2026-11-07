@@ -61,7 +61,8 @@ Quick syntax check without full test run:
 poetry run python -m py_compile kube\model.py kube\main.py kube\web\server.py
 ```
 
-Benchmark suite (also exercised by `examples/benchmark_kube_vs_binary.py`):
+Benchmark suite (scenario-based: streaming import, table conversion, LLM
+dataset iteration, viewer ops — see `kube/benchmark/`):
 
 ```bash
 kube benchmark --size 64 --iterations 5

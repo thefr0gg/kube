@@ -240,9 +240,6 @@ Key takeaways:
 - **`lm_dataset`** — `import_token_ids` is a one-time cost per dataset; `iter_sequence_batches` is what a training loop actually pays per step, and it's measured separately here for that reason.
 - **`viewer_ops`** — `set_face+flush` edits are sub-millisecond even per-call, confirming the web viewer's "flush immediately on every edit" design doesn't bottleneck interactive use; `build_slice_mesh` is slower than `build_shell_mesh` at the same grid size because a slice renders all 6 faces of every cell in the plane instead of only boundary faces.
 
-For a model-size comparison instead (packed cells vs. plain binary
-occupancy), see [`examples/benchmark_kube_vs_binary.py`](examples/benchmark_kube_vs_binary.py).
-
 ## Project Layout
 
 - [kube/model.py](kube/model.py): storage model and file format logic
