@@ -3,7 +3,7 @@
 Kube is a spatial-native data system for datasets that need structure, locality,
 and direct editability.
 
-Contributor setup and workflow notes live in [CONTRIBUTING.md](https://github.com/ramsy0dev/kube/blob/main/CONTRIBUTING.md).
+Contributor setup and workflow notes live in [CONTRIBUTING.md](https://github.com/thefr0gg/kube/blob/main/CONTRIBUTING.md).
 
 Instead of treating data as only rows, tokens, or voxels, Kube models it as a
 grid of cells whose six faces carry discrete state. That gives you a compact
@@ -101,7 +101,7 @@ sequence corpora that still benefit from a unified storage/runtime layer.
 Clone the repository first:
 
 ```bash
-git clone https://github.com/ramsy0dev/kube.git
+git clone https://github.com/thefr0gg/kube.git
 cd kube
 ```
 
@@ -215,30 +215,30 @@ size=64  states=4  5 iters
 ------------------------------------------------------------------------------
 Scenario           Backend                                Throughput    Best ms    Mean ms
 ------------------------------------------------------------------------------
-stream_import      import_file (streaming)                890k ops/s      294.5      316.4
-stream_import      from_file (load into RAM first)        1.1M ops/s      247.4      265.3
+stream_import      import_file (streaming)                654k ops/s      400.8      437.6
+stream_import      from_file (load into RAM first)        811k ops/s      323.2      350.0
 
-table_conversion   to_polars                              170k ops/s     1545.1     1648.6
-table_conversion   faces_to_numpy                         179k ops/s     1466.8     1781.3
-table_conversion   to_pandas                              152k ops/s     1721.5     2113.5
-table_conversion   to_arrow                               176k ops/s     1491.1     1562.1
-table_conversion   to_parquet                             151k ops/s     1738.8     1815.8
+table_conversion   to_polars                              7.7M ops/s       34.1       36.1
+table_conversion   faces_to_numpy                         7.7M ops/s       34.2       36.6
+table_conversion   to_pandas                              7.4M ops/s       35.4       36.1
+table_conversion   to_arrow                               7.4M ops/s       35.5       38.0
+table_conversion   to_parquet                             2.6M ops/s      100.8      121.8
 
-lm_dataset         import_token_ids                        12k ops/s      353.5      521.5
-lm_dataset         iter_sequence_batches                   90k tok/s       45.6       47.1
+lm_dataset         import_token_ids                        11k ops/s      367.8      387.9
+lm_dataset         iter_sequence_batches                   82k tok/s       49.7       60.2
 
-viewer_ops         set_face+flush (edit round trip)      520k edits/s        0.5        0.7
-viewer_ops         build_shell_mesh                      171k cells/s     1531.5     1668.3
-viewer_ops         build_slice_mesh                        2k cells/s     1787.4     1996.3
+viewer_ops         set_face+flush (edit round trip)       15k edits/s       16.7       17.3
+viewer_ops         build_shell_mesh                      5.6M cells/s       46.8       51.2
+viewer_ops         build_slice_mesh                      107k cells/s       38.3       41.3
 ------------------------------------------------------------------------------
 ```
 
 Key takeaways:
 
 - **`stream_import`** — at this size the file fits comfortably in memory, so eager `from_file` edges out streaming `import_file`; streaming's advantage is staying flat as file size grows past what fits in RAM, not winning at small sizes.
-- **`table_conversion`** — all five export formats land within a similar band, since every one of them routes through `to_polars()` internally (see [Chapter 4 of the guide](docs/guide/04-tables-and-interop.md)); the cost is largely the one-time Polars frame construction, not the format-specific serialization after that.
-- **`lm_dataset`** — `import_token_ids` is a one-time cost per dataset; `iter_sequence_batches` is what a training loop actually pays per step, and it's measured separately here for that reason.
-- **`viewer_ops`** — `set_face+flush` edits are sub-millisecond even per-call, confirming the web viewer's "flush immediately on every edit" design doesn't bottleneck interactive use; `build_slice_mesh` is slower than `build_shell_mesh` at the same grid size because a slice renders all 6 faces of every cell in the plane instead of only boundary faces.
+- **`table_conversion`** — `to_polars`/`feature_frame`/`faces_to_numpy`/`to_pandas`/`to_arrow` all route through one vectorized numpy unpack (bulk bit shift + mask over the packed buffer) instead of a per-cell Python loop, which is why they land in the same ~7.5M ops/s band; `to_parquet` is lower because it additionally pays real Parquet serialization and compression on top.
+- **`lm_dataset`** — `import_token_ids` is a one-time cost per dataset; `iter_sequence_batches` is what a training loop actually pays per step, and its token decoding is vectorized (`np.frombuffer` instead of a per-token `int.from_bytes` loop).
+- **`viewer_ops`** — measured against a real mapped `.kube` file (matching what `kube view` actually opens); `set_face+flush` only rewrites the on-disk header when metadata actually changed, instead of unconditionally on every single-cell edit, cutting the edit round trip from roughly 130 edits/s to the 15k shown here.
 
 ## Project Layout
 

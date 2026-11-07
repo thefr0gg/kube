@@ -135,8 +135,8 @@ That is especially important for native acceleration work.
 
 When a contribution changes behavior, update the relevant docs in the same PR:
 
-- [README.md](https://github.com/ramsy0dev/kube/blob/main/README.md)
-- [docs/reference.md](https://github.com/ramsy0dev/kube/blob/main/docs/reference.md)
+- [README.md](https://github.com/thefr0gg/kube/blob/main/README.md)
+- [docs/reference.md](https://github.com/thefr0gg/kube/blob/main/docs/reference.md)
 - examples in `examples/`
 
 If a feature adds a new workflow, include at least one concrete example.

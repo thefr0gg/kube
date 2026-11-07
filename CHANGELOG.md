@@ -81,4 +81,4 @@ Initial public beta. Everything is new.
 
 ---
 
-[0.0.1b1]: https://github.com/ramsy0dev/kube/releases/tag/v0.0.1b1
+[0.0.1b1]: https://github.com/thefr0gg/kube/releases/tag/v0.0.1b1

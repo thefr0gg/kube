@@ -22,7 +22,7 @@ import struct
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 import polars as pl
 
@@ -640,6 +640,11 @@ class Kube:
             )
         self._storage_accel = _STORAGE_ACCELERATOR
         self._acceleration_mode = "native"
+        # Starts dirty so the first flush() after create/open always writes
+        # the header once; cleared after each successful header write and
+        # re-set only where header-relevant state (metadata, source byte
+        # count) actually changes, so per-cell edits don't pay for it.
+        self._header_dirty = True
 
     @property
     def shape(self) -> tuple[int, int, int]:
@@ -781,8 +786,9 @@ class Kube:
         if self.mode == "r":
             return
         self.data.flush()
-        if self.is_mapped:
+        if self.is_mapped and self._header_dirty:
             self._write_header()
+            self._header_dirty = False
 
     def update_metadata(self, **metadata) -> None:
         """Merge metadata keys into the kube header state.
@@ -792,8 +798,10 @@ class Kube:
         """
         self._ensure_writable()
         self.metadata.update(metadata)
+        self._header_dirty = True
         if self.is_mapped:
             self._write_header()
+            self._header_dirty = False
 
     def close(self) -> None:
         """Close underlying storage resources."""
@@ -1033,6 +1041,7 @@ class Kube:
         self._write_packed_values(0, packed_values)
         self.data.clear_from(len(packed_values), accelerator=self._storage_accel)
         self.source_byte_count = len(data)
+        self._header_dirty = True
         self.flush()
 
     def _stream_import(self, src_path: Path, *, chunk_size: int) -> None:
@@ -1190,10 +1199,12 @@ class Kube:
         if count < 0:
             raise ValueError("count must be non-negative")
         raw = self.read_byte_range(start * token_bytes, count * token_bytes)
-        return [
-            int.from_bytes(raw[offset:offset + token_bytes], "little", signed=signed)
-            for offset in range(0, len(raw), token_bytes)
-        ]
+
+        import numpy as np
+
+        dtype_map = {1: "u1", 2: "u2", 4: "u4", 8: "u8"}
+        dtype = ("<" + dtype_map[token_bytes]) if not signed else ("<i" + dtype_map[token_bytes][1:])
+        return np.frombuffer(raw, dtype=dtype).tolist()
 
     def encode_token_ids(
         self,
@@ -1405,30 +1416,43 @@ class Kube:
         """Materialize cube contents as a Polars DataFrame.
 
         This method exists to make Kube easy to analyze with column-oriented
-        data tools and ML preprocessing pipelines.
+        data tools and ML preprocessing pipelines. Unpacking is vectorized
+        over numpy (bulk bit shift + mask) instead of a per-cell Python loop,
+        since `feature_frame`, `faces_to_numpy`, `to_pandas`, `to_arrow`,
+        `to_parquet`, and `to_sklearn_xy` all route through this method.
         """
         if not any((include_coords, include_packed, include_faces)):
             raise ValueError("at least one output group must be enabled")
 
-        rows: dict[str, list[int]] = {}
-        if include_coords:
-            rows.update({"x": [], "y": [], "z": []})
-        if include_packed:
-            rows["packed"] = []
-        if include_faces:
-            for name in self.face_columns:
-                rows[name] = []
+        import numpy as np
 
-        for x, y, z, packed, cell in self._iter_cells(bounds):
-            if include_coords:
-                rows["x"].append(x)
-                rows["y"].append(y)
-                rows["z"].append(z)
-            if include_packed:
-                rows["packed"].append(packed)
-            if include_faces:
-                for name, value in zip(self.face_columns, cell.faces):
-                    rows[name].append(value)
+        (x0, x1), (y0, y1), (z0, z1) = (
+            self.full_bounds() if bounds is None else _normalize_bounds(bounds, self.shape)
+        )
+
+        packed_grid = np.asarray(self.data._data_view).reshape(self.W, self.H, self.D)
+        region = packed_grid[x0:x1, y0:y1, z0:z1]
+        packed_flat = region.reshape(-1).astype(np.uint64)
+
+        rows: dict[str, Any] = {}
+        if include_coords:
+            xs, ys, zs = np.meshgrid(
+                np.arange(x0, x1, dtype=np.uint32),
+                np.arange(y0, y1, dtype=np.uint32),
+                np.arange(z0, z1, dtype=np.uint32),
+                indexing="ij",
+            )
+            rows["x"] = xs.reshape(-1)
+            rows["y"] = ys.reshape(-1)
+            rows["z"] = zs.reshape(-1)
+        if include_packed:
+            rows["packed"] = packed_flat
+        if include_faces:
+            shifts = (self.B * np.arange(6, dtype=np.uint64)).reshape(1, 6)
+            face_mask = np.uint64(self._face_mask)
+            faces = (packed_flat.reshape(-1, 1) >> shifts) & face_mask
+            for index, name in enumerate(self.face_columns):
+                rows[name] = faces[:, index]
         return pl.DataFrame(rows)
 
     def feature_frame(

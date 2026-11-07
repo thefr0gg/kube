@@ -57,7 +57,7 @@ def build_fixtures(
     fixtures["stream_import"] = _build_stream_import_fixtures(tmp_root, size, states, seed)
     fixtures["table_conversion"] = _build_table_conversion_fixtures(tmp_root, size, states, seed)
     fixtures["lm_dataset"] = _build_lm_dataset_fixtures(tmp_root, size, seed)
-    fixtures["viewer_ops"] = _build_viewer_ops_fixtures(size, states, seed)
+    fixtures["viewer_ops"] = _build_viewer_ops_fixtures(tmp_root, size, states, seed)
     return fixtures
 
 
@@ -129,10 +129,16 @@ def _build_lm_dataset_fixtures(tmp_root: Path, size: int, seed: int) -> dict[str
     }
 
 
-def _build_viewer_ops_fixtures(size: int, states: int, seed: int) -> dict[str, Any]:
-    """An in-memory kube plus pre-built edit ops for the viewer scenario."""
+def _build_viewer_ops_fixtures(tmp_root: Path, size: int, states: int, seed: int) -> dict[str, Any]:
+    """A mapped kube plus pre-built edit ops for the viewer scenario.
+
+    Uses a mapped file, not an in-memory kube, because the real `kube view`
+    always opens a `.kube` file (see `_handle_view` in `kube/main.py`) — the
+    edit round trip's `flush()` cost only shows up for mapped storage.
+    """
     viewer_size = max(4, min(size, 96))
-    kube = Kube(viewer_size, viewer_size, viewer_size, states=states)
+    kube_path = tmp_root / "viewer_ops.kube"
+    kube = Kube.create(kube_path, (viewer_size, viewer_size, viewer_size), states=states)
     payload = _random_bytes(kube.capacity_bytes(), seed)
     kube.encode(payload)
 
