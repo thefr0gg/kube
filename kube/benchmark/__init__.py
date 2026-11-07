@@ -17,15 +17,15 @@ from __future__ import annotations
 from kube.benchmark._runner import (
     BenchmarkConfig,
     BenchmarkResult,
+    ScenarioResult,
     TimingResult,
-    WorkloadResult,
     run_benchmarks,
 )
 
 __all__ = [
     "BenchmarkConfig",
     "BenchmarkResult",
+    "ScenarioResult",
     "TimingResult",
-    "WorkloadResult",
     "run_benchmarks",
 ]

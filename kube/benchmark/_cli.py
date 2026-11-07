@@ -9,17 +9,11 @@ from pathlib import Path
 from kube.benchmark._reporter import format_table, plot_results, to_json_dict
 from kube.benchmark._runner import BenchmarkConfig, run_benchmarks
 
-_ALL_WORKLOADS = [
-    "random_read",
-    "random_write",
-    "neighborhood",
-    "region_extract",
-    "full_scan",
-    "histogram",
-    "polars_pipeline",
-    "batch_iter",
-    "lm_sequence_iter",
-    "mutation",
+_ALL_SCENARIOS = [
+    "stream_import",
+    "table_conversion",
+    "lm_dataset",
+    "viewer_ops",
 ]
 
 
@@ -30,33 +24,33 @@ def add_benchmark_parser(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=64,
         metavar="N",
-        help="grid side length (use 32/64/128/256)",
+        help="scenario size scale (cube side length / token row count, scenario-dependent)",
     )
     parser.add_argument(
         "--states",
         type=int,
         default=4,
-        help="face state count",
+        help="face state count for kube-backed scenarios",
     )
     parser.add_argument(
-        "--workloads",
+        "--scenarios",
         type=_parse_list,
         default=None,
-        metavar="W,...",
-        help=f"comma-separated workload names; available: {', '.join(_ALL_WORKLOADS)}",
+        metavar="S,...",
+        help=f"comma-separated scenario names; available: {', '.join(_ALL_SCENARIOS)}",
     )
     parser.add_argument(
         "--backends",
         type=_parse_list,
         default=None,
         metavar="B,...",
-        help="comma-separated backend names (kube, numpy, binary, polars)",
+        help="comma-separated backend labels to restrict to (see table output for exact names)",
     )
     parser.add_argument(
         "--iterations",
         type=int,
-        default=5,
-        help="timing repetitions per workload",
+        default=3,
+        help="timing repetitions per scenario",
     )
     parser.add_argument(
         "--seed",
@@ -68,13 +62,6 @@ def add_benchmark_parser(parser: argparse.ArgumentParser) -> None:
         "--plot",
         action="store_true",
         help="save throughput bar chart to benchmark_results.png",
-    )
-    parser.add_argument(
-        "--dataset",
-        type=Path,
-        dest="dataset_path",
-        metavar="PATH",
-        help=".kubed dataset path for the lm_sequence_iter workload",
     )
     parser.add_argument(
         "--tmp-dir",
@@ -90,11 +77,10 @@ def handle_benchmark(args: argparse.Namespace) -> None:
     config = BenchmarkConfig(
         size=args.size,
         states=args.states,
-        workloads=args.workloads,
+        scenarios=args.scenarios,
         backends=args.backends,
         iterations=args.iterations,
         seed=args.seed,
-        dataset_path=args.dataset_path,
         tmp_dir=args.tmp_dir,
         plot=args.plot,
     )

@@ -2,36 +2,21 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-try:
-    from importlib.metadata import PackageNotFoundError, version as _pkg_version
-except ImportError:
-    _pkg_version = None  # type: ignore[assignment]
-    PackageNotFoundError = Exception  # type: ignore[assignment,misc]
-
-from kube.benchmark._runner import BenchmarkResult, WorkloadResult
-
-
-def _kube_version() -> str:
-    try:
-        return _pkg_version("kube")
-    except PackageNotFoundError:
-        return "0.0.0+local"
+from kube.benchmark._runner import BenchmarkResult
 
 
 def _fmt_ms(seconds: float) -> str:
-    return f"{seconds * 1000:8.1f}"
+    return f"{seconds * 1000:9.1f}"
 
 
-def _fmt_throughput(workload: str, throughput: float) -> str:
-    unit = "tok/s" if "lm_sequence_iter" in workload else "ops/s"
+def _fmt_throughput(throughput: float, unit: str) -> str:
     if throughput >= 1_000_000:
-        return f"{throughput / 1_000_000:5.1f}M {unit}"
+        return f"{throughput / 1_000_000:6.1f}M {unit}"
     if throughput >= 1_000:
-        return f"{throughput / 1_000:7.0f}k {unit}"
-    return f"{throughput:7.0f}  {unit}"
+        return f"{throughput / 1_000:8.0f}k {unit}"
+    return f"{throughput:8.0f}  {unit}"
 
 
 def format_table(result: BenchmarkResult) -> str:
@@ -40,30 +25,24 @@ def format_table(result: BenchmarkResult) -> str:
     cfg = result.config
     ver = result.kube_version
     lines.append(f"kube benchmark  v{ver}")
-    lines.append(
-        f"size={cfg['size']}³  s={cfg['states']} states  {cfg['iterations']} iters"
-    )
-    sep = "─" * 72
+    lines.append(f"size={cfg['size']}  states={cfg['states']}  {cfg['iterations']} iters")
+    sep = "-" * 78
     lines.append(sep)
-    lines.append(f"{'Workload':<22} {'Backend':<16} {'Throughput':>16} {'Best ms':>9} {'Mean ms':>9}")
+    lines.append(f"{'Scenario':<18} {'Backend':<32} {'Throughput':>16} {'Best ms':>10} {'Mean ms':>10}")
     lines.append(sep)
 
-    prev_workload = ""
+    prev_scenario = ""
     for r in result.results:
-        if r.workload != prev_workload and prev_workload:
+        if r.scenario != prev_scenario and prev_scenario:
             lines.append("")
-        prev_workload = r.workload
-
-        label = r.workload
-        if r.size_label:
-            label = f"{label}[{r.size_label}]"
+        prev_scenario = r.scenario
 
         lines.append(
-            f"{label:<22} "
-            f"{r.backend:<16} "
-            f"{_fmt_throughput(r.workload, r.timing.throughput):>16} "
-            f"{_fmt_ms(r.timing.best_s):>9} "
-            f"{_fmt_ms(r.timing.mean_s):>9}"
+            f"{r.scenario:<18} "
+            f"{r.backend:<32} "
+            f"{_fmt_throughput(r.timing.throughput, r.unit):>16} "
+            f"{_fmt_ms(r.timing.best_s):>10} "
+            f"{_fmt_ms(r.timing.mean_s):>10}"
         )
 
     lines.append(sep)
@@ -76,9 +55,9 @@ def to_json_dict(result: BenchmarkResult) -> dict[str, Any]:
     for r in result.results:
         rows.append(
             {
-                "workload": r.workload,
+                "scenario": r.scenario,
                 "backend": r.backend,
-                "size_label": r.size_label,
+                "unit": r.unit,
                 "notes": r.notes,
                 "throughput": r.timing.throughput,
                 "best_ms": r.timing.best_s * 1000,
@@ -105,19 +84,17 @@ def plot_results(result: BenchmarkResult, output_path: str) -> None:
             "matplotlib is required for --plot; install it with: pip install matplotlib"
         ) from exc
 
-    labels = [f"{r.workload}\n{r.backend}" for r in result.results]
-    throughputs = [r.timing.throughput / 1_000_000 for r in result.results]
+    labels = [f"{r.scenario}\n{r.backend}" for r in result.results]
+    throughputs = [r.timing.throughput for r in result.results]
 
-    fig, ax = plt.subplots(figsize=(max(8, len(labels)), 5))
+    fig, ax = plt.subplots(figsize=(max(8, len(labels) * 1.2), 5))
     ax.bar(range(len(labels)), throughputs)
     ax.set_xticks(range(len(labels)))
     ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel("Throughput (M ops/s)")
+    ax.set_yscale("log")
+    ax.set_ylabel("Throughput (ops/s, log scale)")
     cfg = result.config
-    ax.set_title(
-        f"kube benchmark v{result.kube_version}  "
-        f"[size={cfg['size']}³  s={cfg['states']} states]"
-    )
+    ax.set_title(f"kube benchmark v{result.kube_version}  [size={cfg['size']}  states={cfg['states']}]")
     fig.tight_layout()
     fig.savefig(output_path, dpi=120)
     plt.close(fig)

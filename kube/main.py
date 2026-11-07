@@ -1032,8 +1032,8 @@ def build_parser() -> argparse.ArgumentParser:
         subparsers,
         "benchmark",
         help_text="run the Kube performance benchmark suite",
-        description="Time Kube grid operations across multiple workloads and backends.",
-        epilog="Example:\n  kube benchmark --size 64 --iterations 5\n  kube benchmark --workloads random_read,mutation --output json",
+        description="Time realistic Kube usage scenarios: streaming import, table conversion, LLM dataset iteration, and viewer operations.",
+        epilog="Example:\n  kube benchmark --size 64 --iterations 5\n  kube benchmark --scenarios stream_import,lm_dataset --output json",
     )
     add_benchmark_parser(benchmark_parser)
     benchmark_parser.set_defaults(func=handle_benchmark)

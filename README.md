@@ -194,75 +194,54 @@ quick-lookup API table, see
 
 ## Benchmark Results
 
-Run the suite yourself:
+The suite times realistic Kube usage scenarios, not raw micro-ops: streaming
+a large file into a `.kube` container, converting a stored kube to a table
+for a pipeline, importing and iterating an LLM token dataset, and the web
+viewer's edit and mesh-build hot paths.
+
+Run it yourself:
 
 ```bash
 kube benchmark --size 64 --iterations 5
 kube benchmark --size 64 --iterations 5 --output json > results.json
+kube benchmark --scenarios stream_import,lm_dataset
 ```
 
-Results on a 64³ grid, 4 states, 5 iterations (Windows, MinGW64, w64devkit gcc):
+Results at `--size 64`, 5 iterations (Windows, MinGW64, w64devkit gcc, pyarrow/pandas installed):
 
 ```
-kube benchmark  v0.0.0+local
-size=64³  s=4 states  5 iters
-────────────────────────────────────────────────────────────────────────
-Workload               Backend                Throughput   Best ms   Mean ms
-────────────────────────────────────────────────────────────────────────
-random_read            kube                   5.0M ops/s      39.7      46.3
-random_read            numpy                 22.5M ops/s       8.9       9.8
-random_read            binary 1 bit/cell       1.8M ops/s     111.8     117.8
+kube benchmark  v0.0.1b1
+size=64  states=4  5 iters
+------------------------------------------------------------------------------
+Scenario           Backend                                Throughput    Best ms    Mean ms
+------------------------------------------------------------------------------
+stream_import      import_file (streaming)                890k ops/s      294.5      316.4
+stream_import      from_file (load into RAM first)        1.1M ops/s      247.4      265.3
 
-random_write           kube                 399.1M ops/s       0.5       0.7
-random_write           numpy                 54.0M ops/s       3.7       4.2
-random_write           binary 1 bit/cell       1.3M ops/s     150.5     164.4
+table_conversion   to_polars                              170k ops/s     1545.1     1648.6
+table_conversion   faces_to_numpy                         179k ops/s     1466.8     1781.3
+table_conversion   to_pandas                              152k ops/s     1721.5     2113.5
+table_conversion   to_arrow                               176k ops/s     1491.1     1562.1
+table_conversion   to_parquet                             151k ops/s     1738.8     1815.8
 
-neighborhood           kube                   6.1M ops/s       9.7      10.5
-neighborhood           numpy                 33.1M ops/s       1.8       1.9
+lm_dataset         import_token_ids                        12k ops/s      353.5      521.5
+lm_dataset         iter_sequence_batches                   90k tok/s       45.6       47.1
 
-region_extract         kube lower octant        88k ops/s     373.2     439.3
-region_extract         numpy                135.2M ops/s       0.2       0.3
-
-full_scan              kube                    88k ops/s    2991.9    3239.0
-full_scan              numpy reshape+sum     200.6M ops/s       1.3       1.5
-
-histogram              kube                   108k ops/s    2437.2    3581.2
-histogram              numpy np.bincount     145.7M ops/s       1.8       1.9
-histogram              polars                  90k ops/s    2905.8    2977.0
-
-polars_pipeline        kube filter+group_by        87k ops/s    3000.6    3180.9
-polars_pipeline        numpy→polars→filter+group_by      46.2M ops/s       5.7       7.6
-
-batch_iter[1k]         kube                    90k ops/s    2918.7    4233.1
-batch_iter[64k]        kube                    87k ops/s    3014.2    3256.6
-batch_iter[512k]       kube                    88k ops/s    2989.9    3251.0
-
-mutation               kube interleaved r+w      10.3M ops/s      19.4      22.3
-mutation               numpy                 37.9M ops/s       5.3       5.6
-mutation               binary 1 bit/cell       1.5M ops/s     129.1     140.7
-
-export_arrow           kube wide_faces         85k ops/s    3068.4    3642.5
-export_arrow           kube long_faces        440k ops/s    3578.3    3971.7
-export_arrow           kube cell_packed       174k ops/s    1509.3    1686.8
-
-export_parquet         kube wide_faces        129k ops/s    2029.6    2343.8
-
-export_numpy           kube faces_to_numpy       135k ops/s    1942.6    1991.8
-export_numpy           kube to_numpy flat       149k ops/s    1754.2    1852.7
-
-export_pandas          kube to_pandas         141k ops/s    1864.3    1910.4
-
-sklearn_xy             kube to_sklearn_xy       146k ops/s    1795.4    1840.6
-────────────────────────────────────────────────────────────────────────
+viewer_ops         set_face+flush (edit round trip)      520k edits/s        0.5        0.7
+viewer_ops         build_shell_mesh                      171k cells/s     1531.5     1668.3
+viewer_ops         build_slice_mesh                        2k cells/s     1787.4     1996.3
+------------------------------------------------------------------------------
 ```
 
 Key takeaways:
 
-- **random_write** is the fastest single-cell path — the native storage engine batches packed-cell writes without per-call Python overhead.
-- **random_read** is slower than numpy because numpy uses direct array indexing while Kube unpacks face values from packed storage on each access.
-- **binary 1 bit/cell** is consistently the slowest backend despite storing less data — the Python loop over individual cells dominates.
-- **full_scan / histogram / polars_pipeline** throughputs reflect the cost of materializing a full Polars frame on each call; the frame itself is fast once built.
-- **export_arrow / export_parquet / export_numpy / export_pandas** throughputs cover the full round-trip including frame construction and format serialization.
+- **`stream_import`** — at this size the file fits comfortably in memory, so eager `from_file` edges out streaming `import_file`; streaming's advantage is staying flat as file size grows past what fits in RAM, not winning at small sizes.
+- **`table_conversion`** — all five export formats land within a similar band, since every one of them routes through `to_polars()` internally (see [Chapter 4 of the guide](docs/guide/04-tables-and-interop.md)); the cost is largely the one-time Polars frame construction, not the format-specific serialization after that.
+- **`lm_dataset`** — `import_token_ids` is a one-time cost per dataset; `iter_sequence_batches` is what a training loop actually pays per step, and it's measured separately here for that reason.
+- **`viewer_ops`** — `set_face+flush` edits are sub-millisecond even per-call, confirming the web viewer's "flush immediately on every edit" design doesn't bottleneck interactive use; `build_slice_mesh` is slower than `build_shell_mesh` at the same grid size because a slice renders all 6 faces of every cell in the plane instead of only boundary faces.
+
+For a model-size comparison instead (packed cells vs. plain binary
+occupancy), see [`examples/benchmark_kube_vs_binary.py`](examples/benchmark_kube_vs_binary.py).
 
 ## Project Layout
 

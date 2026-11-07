@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import shutil
 import statistics
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -35,13 +36,13 @@ class TimingResult:
 
 
 @dataclass
-class WorkloadResult:
-    """Single (workload, backend) measurement."""
+class ScenarioResult:
+    """Single (scenario, backend) measurement."""
 
-    workload: str
+    scenario: str
     backend: str
     timing: TimingResult
-    size_label: str = ""
+    unit: str = "ops/s"
     notes: str = ""
 
 
@@ -51,7 +52,7 @@ class BenchmarkResult:
 
     config: dict[str, Any]
     timestamp: str
-    results: list[WorkloadResult]
+    results: list[ScenarioResult]
     kube_version: str
 
 
@@ -61,48 +62,12 @@ class BenchmarkConfig:
 
     size: int = 64
     states: int = 4
-    workloads: list[str] | None = None
+    scenarios: list[str] | None = None
     backends: list[str] | None = None
-    iterations: int = 5
+    iterations: int = 3
     seed: int = 1337
-    dataset_path: Path | None = None
     tmp_dir: str | None = None
     plot: bool = False
-
-
-def _xorshift32(state: int) -> int:
-    """Return the next deterministic pseudo-random 32-bit integer."""
-    state &= 0xFFFF_FFFF
-    state ^= (state << 13) & 0xFFFF_FFFF
-    state ^= state >> 17
-    state ^= (state << 5) & 0xFFFF_FFFF
-    return state & 0xFFFF_FFFF
-
-
-def build_random_ops(
-    W: int,
-    H: int,
-    D: int,
-    S: int,
-    count: int,
-    seed: int,
-) -> list[tuple[int, int, int, int, int]]:
-    """Build a deterministic list of (x, y, z, face, value) operations."""
-    state = int(seed) or 1
-    ops: list[tuple[int, int, int, int, int]] = []
-    for _ in range(int(count)):
-        state = _xorshift32(state)
-        x = state % W
-        state = _xorshift32(state)
-        y = state % H
-        state = _xorshift32(state)
-        z = state % D
-        state = _xorshift32(state)
-        face = state % 6
-        state = _xorshift32(state)
-        value = state % S
-        ops.append((x, y, z, face, value))
-    return ops
 
 
 def _warm_up(fn: Callable) -> None:
@@ -123,7 +88,7 @@ def _measure(fn: Callable, iterations: int, ops: int) -> TimingResult:
 
 
 def run_benchmarks(config: BenchmarkConfig) -> BenchmarkResult:
-    """Run the selected workloads and return a :class:`BenchmarkResult`."""
+    """Run the selected scenarios and return a :class:`BenchmarkResult`."""
     import importlib.metadata
 
     try:
@@ -134,36 +99,37 @@ def run_benchmarks(config: BenchmarkConfig) -> BenchmarkResult:
     from kube.benchmark._backends import build_fixtures
     from kube.benchmark._workloads import build_suite
 
-    W = H = D = config.size
-    S = config.states
-    ops_list = build_random_ops(W, H, D, S, count=200_000, seed=config.seed)
-    fixtures = build_fixtures(W, H, D, S, ops_list, config.seed, tmp_dir=config.tmp_dir)
+    fixtures = build_fixtures(config.size, config.states, config.seed, tmp_dir=config.tmp_dir)
+    tmp_root: Path = fixtures["tmp_root"]
 
-    suite = build_suite(fixtures, config)
+    try:
+        suite = build_suite(fixtures, config)
 
-    want_workloads = set(config.workloads) if config.workloads else None
-    want_backends = set(config.backends) if config.backends else None
+        want_scenarios = set(config.scenarios) if config.scenarios else None
+        want_backends = set(config.backends) if config.backends else None
 
-    results: list[WorkloadResult] = []
-    for entry in suite:
-        wname = entry["workload"]
-        bname = entry["backend"]
-        if want_workloads is not None and wname not in want_workloads:
-            continue
-        if want_backends is not None and bname not in want_backends:
-            continue
-        fn = entry["fn"]
-        n_ops = entry.get("ops", len(ops_list))
-        timing = _measure(fn, config.iterations, n_ops)
-        results.append(
-            WorkloadResult(
-                workload=wname,
-                backend=bname,
-                timing=timing,
-                size_label=entry.get("size_label", ""),
-                notes=entry.get("notes", ""),
+        results: list[ScenarioResult] = []
+        for entry in suite:
+            sname = entry["scenario"]
+            bname = entry["backend"]
+            if want_scenarios is not None and sname not in want_scenarios:
+                continue
+            if want_backends is not None and bname not in want_backends:
+                continue
+            fn = entry["fn"]
+            n_ops = entry.get("ops", 0)
+            timing = _measure(fn, config.iterations, n_ops)
+            results.append(
+                ScenarioResult(
+                    scenario=sname,
+                    backend=bname,
+                    timing=timing,
+                    unit=entry.get("unit", "ops/s"),
+                    notes=entry.get("notes", ""),
+                )
             )
-        )
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
 
     ts = datetime.now(timezone.utc).isoformat()
     cfg_dict = {
@@ -171,7 +137,6 @@ def run_benchmarks(config: BenchmarkConfig) -> BenchmarkResult:
         "states": config.states,
         "iterations": config.iterations,
         "seed": config.seed,
-        "dataset_path": str(config.dataset_path) if config.dataset_path else None,
     }
     return BenchmarkResult(
         config=cfg_dict,
