@@ -70,15 +70,15 @@ The default target is `kube_native`, which builds it.
 Examples:
 
 ```bash
-python build.py
-python build.py --target kube_storage
-python build.py --cmake-only
+python scripts/build.py
+python scripts/build.py --target kube_storage
+python scripts/build.py --cmake-only
 ```
 
 Windows MinGW example:
 
 ```powershell
-python build.py --generator "MinGW Makefiles"
+python scripts/build.py --generator "MinGW Makefiles"
 ```
 
 Useful flags:
@@ -104,7 +104,7 @@ poetry run kube benchmark --size 16 --iterations 1
 For native changes, also verify the shared library still builds:
 
 ```bash
-python build.py
+python scripts/build.py
 ```
 
 ## Contribution Expectations

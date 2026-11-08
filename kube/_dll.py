@@ -53,10 +53,10 @@ def load_storage_dll(*, optional: bool = False) -> ctypes.CDLL | None:
         raise FileNotFoundError(
             f"{_storage_lib_names()[0]} not found in {Path(__file__).parent}\n"
             "Build it first:\n"
-            "  python build.py\n"
+            "  python scripts/build.py\n"
             "\n"
-            "Windows (MinGW64):  python build.py --generator \"MinGW Makefiles\"\n"
-            "Linux:              python3 build.py\n"
+            "Windows (MinGW64):  python scripts/build.py --generator \"MinGW Makefiles\"\n"
+            "Linux:              python3 scripts/build.py\n"
         )
 
     try:

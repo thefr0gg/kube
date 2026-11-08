@@ -32,13 +32,11 @@ Build the native storage library directly (needed after editing `src/*.c` —
 the Poetry hook only runs on install):
 
 ```bash
-python build.py                                  # Linux/default
-python build.py --generator "MinGW Makefiles"     # Windows MinGW64
-python build.py --clean                           # wipe build/ first
-python build.py --cmake-only                      # configure only, no compile
+python scripts/build.py                                  # Linux/default
+python scripts/build.py --generator "MinGW Makefiles"     # Windows MinGW64
+python scripts/build.py --clean                           # wipe build/ first
+python scripts/build.py --cmake-only                      # configure only, no compile
 ```
-
-Or the wrapper scripts: `.\build.bat` (Windows), `./build.sh` (Linux).
 
 Native build needs `cmake >= 3.20` and a C toolchain — no other native
 dependency. The web viewer (`kube view`) needs no native build at all; it's
@@ -119,11 +117,12 @@ output, `_cli.py` wires it to `kube benchmark`).
 
 ## Native Build Gotchas
 
-- CMake caches its generator in `CMakeCache.txt`; `build.py` detects a
-  generator mismatch and auto-deletes the stale top-level *and* nested
+- CMake caches its generator in `CMakeCache.txt`; `scripts/build.py` detects
+  a generator mismatch and auto-deletes the stale top-level *and* nested
   (FetchContent) caches rather than failing — see `_reset_incompatible_cache`
-  and `_reset_incompatible_nested_caches` in `build.py` if a rebuild misbehaves.
-- On Windows, `build.py` prefers Ninja, then MinGW Makefiles (if `gcc`+
+  and `_reset_incompatible_nested_caches` in `scripts/build.py` if a rebuild
+  misbehaves.
+- On Windows, `scripts/build.py` prefers Ninja, then MinGW Makefiles (if `gcc`+
   `mingw32-make` are found), then NMake (if MSVC `cl`/`nmake` are found) —
   plain `cmake` on Windows otherwise defaults to NMake and fails outside a VS
   developer shell.

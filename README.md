@@ -151,9 +151,8 @@ same storage engine through the normal Python API.
 If you need to build it manually:
 
 ```bash
-.\build.bat           # Windows with MinGW64
-./build.sh             # Linux
-python build.py --generator "MinGW Makefiles"   # or call the script directly
+python scripts/build.py                                  # Linux/default
+python scripts/build.py --generator "MinGW Makefiles"     # Windows MinGW64
 ```
 
 Useful flags: `--clean`, `--cmake-only`, `--build-dir <path>`. See

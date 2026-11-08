@@ -23,7 +23,7 @@ include = [
     { path = "kube/**/*.dll", format = "wheel" },
     { path = "kube/**/*.dylib", format = "wheel" },
     { path = "kube/web/static/**/*", format = "wheel" },
-    { path = "build.py", format = "sdist" },
+    { path = "scripts/build.py", format = "sdist" },
     { path = "CMakeLists.txt", format = "sdist" },
     { path = "src/**/*.c", format = "sdist" },
     { path = "src/**/*.h", format = "sdist" },
@@ -53,7 +53,7 @@ examples = ["datasets", "transformers", "tokenizers", "torch", "pyarrow"]
 all = ["pyarrow", "tokenizers", "torch", "datasets", "transformers"]
 
 [tool.poetry.build]
-script = "build.py"
+script = "scripts/build.py"
 
 [build-system]
 requires      = ["poetry-core", "cmake>=3.5"]

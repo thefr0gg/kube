@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BUILD_DIR = ROOT / "build"
 MULTI_CONFIG_GENERATORS = {
     "Visual Studio 16 2019",
@@ -101,7 +101,7 @@ def _source_stamp(root: Path) -> float:
     """
     paths = [
         root / "CMakeLists.txt",
-        root / "build.py",
+        root / "scripts" / "build.py",
     ]
     paths.extend((root / "src").glob("*.c"))
     paths.extend((root / "src").glob("*.h"))
@@ -285,7 +285,7 @@ def build() -> None:
     """Poetry build hook for compiling Kube's native libraries.
 
     Poetry can invoke this module during `poetry install` and `poetry build`
-    when `[tool.poetry.build] script = "build.py"` is configured in
+    when `[tool.poetry.build] script = "scripts/build.py"` is configured in
     `pyproject.toml`.
 
     The hook intentionally uses conservative defaults so that a normal package

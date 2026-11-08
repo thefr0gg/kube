@@ -24,7 +24,7 @@ For task-oriented usage, see:
 - `kube/main.py`: CLI entry points
 - `kube/integrations/`: numpy, sklearn, HuggingFace, and torch adapters
 - `src/kube_storage.c`: native packed-cell storage engine for random IO, face batches, contiguous packed writes, and ingest hot paths
-- `build.py`: configure/build helper for the native library
+- `scripts/build.py`: configure/build helper for the native library
 - `CMakeLists.txt`: native build definition
 - `tests/`: `test_kube.py` (core storage), `test_dataset.py` (sharded datasets), `test_interop.py` (universal data backend), `test_web.py` (mesh + FastAPI app)
 
@@ -298,16 +298,16 @@ unsaved/batched edit state on the server side.
 
 ### Build flow
 
-The native storage library is built through `build.py`, which wraps CMake.
+The native storage library is built through `scripts/build.py`, which wraps CMake.
 
 ```bash
-python build.py
+python scripts/build.py
 ```
 
 On Windows with MinGW:
 
 ```powershell
-python build.py --generator "MinGW Makefiles"
+python scripts/build.py --generator "MinGW Makefiles"
 ```
 
 Useful flags: `--clean`, `--cmake-only`, `--reconfigure`, `--build-dir`.

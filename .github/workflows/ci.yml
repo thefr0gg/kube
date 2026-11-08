@@ -42,7 +42,7 @@ jobs:
 
       - name: Build native library (Windows)
         if: runner.os == 'Windows'
-        run: python build.py --generator "MinGW Makefiles"
+        run: python scripts/build.py --generator "MinGW Makefiles"
 
       - name: Install package (core + arrow extra for interop tests)
         run: poetry install -E arrow
